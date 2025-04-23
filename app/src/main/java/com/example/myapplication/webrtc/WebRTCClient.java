@@ -54,10 +54,12 @@ public class WebRTCClient {
     }
     
     public void initialize() {
+        Log.d(TAG, "Initializing WebRTC client");
         PeerConnectionFactory.InitializationOptions initializationOptions =
                 PeerConnectionFactory.InitializationOptions.builder(context)
                         .createInitializationOptions();
         PeerConnectionFactory.initialize(initializationOptions);
+        Log.d(TAG, "PeerConnectionFactory initialized");
         
         PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
         DefaultVideoEncoderFactory videoEncoderFactory =
@@ -128,7 +130,7 @@ public class WebRTCClient {
         }
     }
     
-    public void createPeerConnection() {
+    public void createPeerConnection(boolean isBroadcaster) {
         List<PeerConnection.IceServer> iceServers = new ArrayList<>();
         iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer());
         
@@ -139,11 +141,13 @@ public class WebRTCClient {
         PeerConnection.Observer observer = new PeerConnection.Observer() {
             @Override
             public void onIceCandidate(IceCandidate iceCandidate) {
+                Log.d(TAG, "Generated ICE candidate: " + iceCandidate);
                 webRTCListener.onIceCandidateReceived(iceCandidate);
             }
             
             @Override
             public void onConnectionChange(PeerConnection.PeerConnectionState state) {
+                Log.d(TAG, "Connection state changed to: " + state);
                 webRTCListener.onConnectionStateChanged(state);
             }
             
@@ -178,17 +182,32 @@ public class WebRTCClient {
             public void onIceCandidatesRemoved(IceCandidate[] iceCandidates) {}
         };
         
+        Log.d(TAG, "Creating peer connection with configuration: " + configuration);
         peerConnection = peerConnectionFactory.createPeerConnection(configuration, observer);
+        if (peerConnection != null) {
+            Log.d(TAG, "Peer connection created successfully");
+        } else {
+            Log.e(TAG, "Failed to create peer connection");
+        }
         
         if (peerConnection != null) {
-            peerConnection.addTrack(localVideoTrack);
-            peerConnection.addTrack(localAudioTrack);
+            // Only add local tracks for broadcasters
+            if (isBroadcaster) {
+                Log.d(TAG, "Adding local video and audio tracks");
+                peerConnection.addTrack(localVideoTrack);
+                peerConnection.addTrack(localAudioTrack);
+                Log.d(TAG, "Local tracks added successfully");
+            }
         }
     }
     
     public void setRemoteDescription(SessionDescription sessionDescription) {
+        Log.d(TAG, "Setting remote description: " + sessionDescription);
         if (peerConnection != null) {
             peerConnection.setRemoteDescription(new SimpleSdpObserver(), sessionDescription);
+            Log.d(TAG, "Remote description set successfully");
+        } else {
+            Log.e(TAG, "Cannot set remote description - peer connection is null");
         }
     }
     
@@ -201,14 +220,15 @@ public class WebRTCClient {
     public void createOffer() {
         if (peerConnection != null) {
             MediaConstraints constraints = new MediaConstraints();
+            Log.d(TAG, "Creating offer with constraints: " + constraints);
             constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
             constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
             
             peerConnection.createOffer(new SimpleSdpObserver() {
                 @Override
                 public void onCreateSuccess(SessionDescription sessionDescription) {
+                    Log.d(TAG, "Offer created successfully");
                     peerConnection.setLocalDescription(new SimpleSdpObserver(), sessionDescription);
-                    // Send offer through signaling server
                 }
             }, constraints);
         }
@@ -217,14 +237,15 @@ public class WebRTCClient {
     public void createAnswer() {
         if (peerConnection != null) {
             MediaConstraints constraints = new MediaConstraints();
+            Log.d(TAG, "Creating answer with constraints: " + constraints);
             constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveVideo", "true"));
             constraints.mandatory.add(new MediaConstraints.KeyValuePair("OfferToReceiveAudio", "true"));
             
             peerConnection.createAnswer(new SimpleSdpObserver() {
                 @Override
                 public void onCreateSuccess(SessionDescription sessionDescription) {
+                    Log.d(TAG, "Offer created successfully");
                     peerConnection.setLocalDescription(new SimpleSdpObserver(), sessionDescription);
-                    // Send answer through signaling server
                 }
             }, constraints);
         }
@@ -276,4 +297,4 @@ public class WebRTCClient {
             peerConnectionFactory = null;
         }
     }
-} 
+}

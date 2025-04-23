@@ -1,7 +1,8 @@
 const express = require("express");
 const app = express();
-const http = require("http").createServer(app);
-const io = require("socket.io")(http, {
+app.use(express.static("public"));
+const server = require("http").createServer(app);
+const io = require("socket.io")(server, {
 	cors: {
 		origin: "*",
 		methods: ["GET", "POST"],
@@ -39,6 +40,27 @@ io.on("connection", (socket) => {
 		socket.to(data.roomId).emit("offer", data);
 	});
 
+	socket.on("screen-offer", (data) => {
+		console.log("Received screen offer from:", socket.id);
+		socket.to(data.roomId).emit("screen-offer", data);
+	});
+
+	socket.on("screen-answer", (data) => {
+		console.log("Received screen answer from:", socket.id);
+		socket.to(data.roomId).emit("screen-answer", data);
+	});
+
+	socket.on("screen-ice-candidate", (data) => {
+		console.log("Received screen ICE candidate from:", socket.id);
+		socket.to(data.roomId).emit("screen-ice-candidate", data);
+	});
+
+	socket.on("join-screen", (data) => {
+		const roomId = data.roomId;
+		socket.join(roomId);
+		console.log("Viewer joined screen sharing room:", roomId);
+	});
+
 	socket.on("answer", (data) => {
 		console.log("Received answer from:", socket.id);
 		socket.to(data.roomId).emit("answer", data);
@@ -71,6 +93,6 @@ io.on("connection", (socket) => {
 });
 
 // Start server
-http.listen(PORT, () => {
+server.listen(PORT, () => {
 	console.log(`Signaling server running on port ${PORT}`);
 });

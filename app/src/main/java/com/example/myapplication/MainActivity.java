@@ -31,6 +31,7 @@ import org.webrtc.SurfaceViewRenderer;
 import org.webrtc.VideoSource;
 
 import java.util.List;
+import java.util.UUID;
 
 public class MainActivity extends AppCompatActivity implements WebRTCClient.WebRTCListener, SignalingClient.SignalingClientListener {
     private static final String TAG = "MainActivity";
@@ -64,7 +65,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         setSupportActionBar(binding.toolbar);
         
         // Initialize SignalingClient
-        signalingClient = new SignalingClient(this);
+        signalingClient = new SignalingClient(this , this);
 
         setupWebRTC();
         setupClickListeners();
@@ -90,15 +91,17 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         binding.startShareButton.setOnClickListener(v -> {
             String roomId = binding.roomIdInput.getText().toString();
             if (roomId.isEmpty()) {
-                Toast.makeText(this, "Please enter a room ID first", Toast.LENGTH_SHORT).show();
-                return;
+                roomId = UUID.randomUUID().toString().substring(0, 8);
+                binding.roomIdInput.setText(roomId);
             }
 
             if (!isScreenSharing) {
-                signalingClient.connect();
-                signalingClient.joinRoom(roomId);
-                Toast.makeText(this, "Connecting to room: " + roomId + "...", Toast.LENGTH_SHORT).show();
-                startScreenShare();
+                signalingClient.connect(() -> {
+                    // Connection established callback
+                    signalingClient.joinRoom(roomId);
+                    Toast.makeText(this, "Connecting to room: " + roomId + "...", Toast.LENGTH_SHORT).show();
+                    startScreenShare();
+                });
             } else {
                 stopScreenShare();
                 signalingClient.disconnect();
@@ -183,21 +186,34 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                 new android.os.Handler().postDelayed(() -> {
                     // Initialize video components
                     if (webRTCClient != null) {
-                        if (videoSource == null) {
+                        if (videoSource == null && webRTCClient != null) {
                             videoSource = webRTCClient.createVideoSource();
+                            if (videoSource == null) {
+                                Log.e(TAG, "Failed to create video source after retry");
+                                Toast.makeText(MainActivity.this, "Video source creation failed", Toast.LENGTH_SHORT).show();
+                                stopScreenShare();
+                                return;
+                            }
                         }
                         
                         // Check components and create surface
                         if (videoSource != null && screenCaptureService != null) {
                             Log.d(TAG, "Creating surface for screen capture");
                             Surface surface = webRTCClient.createSurface();
-                            if (surface != null) {
-                                screenCaptureService.startVirtualDisplay(surface);
-                                Log.d(TAG, "Virtual display started successfully");
-                                Toast.makeText(MainActivity.this, "Screen capture started", Toast.LENGTH_SHORT).show();
-                                isScreenSharing = true;
-                                updateButtonState(true);
-                                webRTCClient.createPeerConnection();
+                            if (surface != null && webRTCClient != null) {
+                                try {
+                                    screenCaptureService.startVirtualDisplay(surface);
+                                    Log.d(TAG, "Virtual display started successfully");
+                                    Toast.makeText(MainActivity.this, "Screen capture started", Toast.LENGTH_SHORT).show();
+                                    isScreenSharing = true;
+                                    updateButtonState(true);
+                                    // Create peer connection after surface validation
+                                    webRTCClient.createPeerConnection(true);
+                                } catch (IllegalStateException e) {
+                                    Log.e(TAG, "Failed to start virtual display: " + e.getMessage());
+                                    Toast.makeText(MainActivity.this, "Screen capture failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                                    stopScreenShare();
+                                }
                             } else {
                                 Log.e(TAG, "Failed to create surface");
                                 Toast.makeText(MainActivity.this, "Failed to create capture surface", Toast.LENGTH_SHORT).show();
@@ -212,7 +228,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                             stopScreenShare();
                         }
                     } else {
-                        Log.e(TAG, "WebRTCClient is null");
+                        Log.d(TAG, "WebRTCClient initialized");
                         Toast.makeText(MainActivity.this, "WebRTCClient initialization failed", Toast.LENGTH_SHORT).show();
                         stopScreenShare();
                     }
@@ -310,8 +326,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     }
 
     private void updateButtonState(boolean isSharing) {
-        Button shareButton = findViewById(R.id.startShareButton);
-        shareButton.setText(isSharing ? "Stop Sharing" : "Start Sharing");
+        binding.startShareButton.setText(isSharing ? "Stop Sharing" : "Start Sharing");
     }
 
     private void stopScreenShare() {
