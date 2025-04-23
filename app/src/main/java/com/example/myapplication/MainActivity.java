@@ -111,8 +111,8 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         
         binding.joinRoomButton.setOnClickListener(v -> {
             String roomId = binding.roomIdInput.getText().toString();
-            if (!roomId.isEmpty()) {
-                signalingClient.connect();
+vrb            if (!roomId.isEmpty()) {
+                signalingClient.connect(() -> {});
                 signalingClient.joinRoom(roomId);
                 Toast.makeText(this, "Joining room: " + roomId + "...", Toast.LENGTH_SHORT).show();
             } else {
