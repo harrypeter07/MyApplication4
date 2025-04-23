@@ -13,91 +13,44 @@
 	</head>
 	<body>
 		<video id="remoteVideo" autoplay playsinline></video>
+		<div
+			id="errorMessage"
+			style="
+				display: none;
+				color: red;
+				position: absolute;
+				top: 10px;
+				left: 10px;
+			"
+		></div>
 
 		<script src="/socket.io/socket.io.js"></script>
 		<script>
-			const socket = io("http://localhost:3000");
-			const videoElement = document.getElementById("remoteVideo");
-			let peerConnection;
-
-			// WebRTC configuration
-			const configuration = {
-				iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-			};
-
-			// Initialize peer connection
-			function createPeerConnection() {
-				peerConnection = new RTCPeerConnection(configuration);
-
-				// Handle remote track
-				peerConnection.ontrack = (event) => {
-					if (event.streams && event.streams[0]) {
-						videoElement.srcObject = event.streams[0];
-					}
-				};
-
-				// ICE candidate handling
-				peerConnection.onicecandidate = (event) => {
-					if (event.candidate) {
-						socket.emit("screen-ice-candidate", {
-							candidate: event.candidate,
-							roomId: getRoomIdFromURL(),
-						});
-					}
-				};
-			}
-
-			// Handle screen-specific offers from signaling server
-			socket.on("screen-offer", async (offer) => {
-				console.log("[WebRTC] Received screen offer:", offer.type);
-				if (!peerConnection) createPeerConnection();
-
-				await peerConnection.setRemoteDescription(
-					new RTCSessionDescription(offer)
-				);
-				const answer = await peerConnection.createAnswer();
-				await peerConnection.setLocalDescription(answer);
-
-				peerConnection.onicecandidate = (event) => {
-					if (event.candidate) {
-						socket.emit("screen-ice-candidate", {
-							candidate: event.candidate.candidate,
-							sdpMid: event.candidate.sdpMid,
-							sdpMLineIndex: event.candidate.sdpMLineIndex,
-							roomId: getRoomIdFromURL(),
-						});
-					}
-				};
-
-				socket.emit("screen-answer", {
-					sdp: answer.sdp,
-					type: answer.type,
-					roomId: getRoomIdFromURL(),
-				});
-			});
-
-			// Handle ICE candidates from signaling server
-			socket.on("screen-ice-candidate", (candidate) => {
-				console.log("[WebRTC] Received remote ICE candidate:", candidate);
-				if (peerConnection && candidate) {
-					peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-				}
-			});
-
-			// Extract room ID from URL query parameters
-			function getRoomIdFromURL() {
-				const params = new URLSearchParams(window.location.search);
-				return params.get("roomId");
-			}
-
 			// Initial setup
 			document.addEventListener("DOMContentLoaded", () => {
 				console.log("[WebRTC] Initializing screen viewer session");
 				const roomId = getRoomIdFromURL();
-				if (roomId) {
-					socket.emit("join-screen", { roomId });
+
+				if (!roomId) {
+					showError("Missing room ID in URL parameters");
+					return;
 				}
+
+				socket.emit("join-screen", { roomId }, (response) => {
+					if (response.error) {
+						showError(`Room connection failed: ${response.error}`);
+						return;
+					}
+					console.log("[Signaling] Successfully joined room:", roomId);
+				});
 			});
+
+			function showError(message) {
+				console.error("[Viewer Error]", message);
+				const errorDiv = document.getElementById("errorMessage");
+				errorDiv.textContent = message;
+				errorDiv.style.display = "block";
+			}
 		</script>
 	</body>
 </html>

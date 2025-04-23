@@ -28,6 +28,7 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
         binding = ActivityViewerBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
         
+        logDeviceInfo();
         roomId = getIntent().getStringExtra("roomId");
         if (roomId == null || roomId.isEmpty()) {
             Log.e(TAG, "Room ID is null or empty");
@@ -49,8 +50,10 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
         webRTCClient = new WebRTCClient(this, this);
         Log.d(TAG, "Initializing WebRTC client");
         webRTCClient.initialize();
+        Log.d(TAG, "WebRTC initialization completed. PeerConnectionFactory: " + webRTCClient.getPeerConnectionFactory());
         Log.d(TAG, "Creating signaling client");
         signalingClient = new SignalingClient(this , this);
+        Log.d(TAG, "Signaling client created. Server URL: " + signalingClient.getServerUrl());
         
         SurfaceViewRenderer remoteVideoView = binding.remoteVideoView;
         remoteVideoView.init(webRTCClient.getEglBaseContext(), null);
@@ -67,10 +70,11 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
     }
     
     private void connectToRoom() {
-        Log.d(TAG, "Connecting to signaling server");
+        Log.d(TAG, "Attempting connection to signaling server");
         signalingClient.connect(() -> {
-            Log.d(TAG, "Joining room: " + roomId);
+            Log.d(TAG, "Signaling connected. Joining room: " + roomId);
             signalingClient.joinRoom(roomId);
+            Log.d(TAG, "PeerConnection configuration: " + webRTCClient.getPeerConnectionConfiguration());
         });
         Log.d(TAG, "Creating peer connection");
         webRTCClient.createPeerConnection(false);
@@ -79,9 +83,9 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
     // WebRTCListener Implementation
     @Override
     public void onIceCandidateReceived(IceCandidate iceCandidate) {
-        // This is called when a local ICE candidate is generated
+        Log.d(TAG, "Local ICE candidate generated: " + iceCandidate.sdpMid + " | " + iceCandidate.sdpMLineIndex);
         signalingClient.sendIceCandidate(iceCandidate);
-        Log.d(TAG, "ICE candidate received: " + iceCandidate.toString());
+        Log.d(TAG, "ICE candidate sent to signaling server");
     }
     
     @Override
@@ -117,9 +121,9 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
     
     @Override
     public void onRemoteIceCandidateReceived(IceCandidate iceCandidate) {
-        // This is called when a remote ICE candidate is received
+        Log.d(TAG, "Remote ICE candidate received. Adding to peer connection");
         webRTCClient.addIceCandidate(iceCandidate);
-        Log.d(TAG, "Remote ICE candidate received: " + iceCandidate.toString());
+        Log.d(TAG, "ICE candidate added successfully: " + (iceCandidate != null ? iceCandidate.sdp : "null"));
     }
     
     @Override
@@ -127,5 +131,14 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
         webRTCClient.release();
         signalingClient.disconnect();
         super.onDestroy();
+    }
+    
+    private void logDeviceInfo() {
+        String deviceModel = Build.MODEL;
+        String osVersion = Build.VERSION.RELEASE;
+        String manufacturer = Build.MANUFACTURER;
+        Log.d(TAG, "Device Info - Model: " + deviceModel 
+            + ", OS: " + osVersion
+            + ", Manufacturer: " + manufacturer);
     }
 }
