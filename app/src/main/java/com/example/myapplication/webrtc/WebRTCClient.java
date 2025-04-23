@@ -99,6 +99,16 @@ public class WebRTCClient {
         return peerConnectionFactory;
     }
 
+    private PeerConnection.RTCConfiguration peerConnectionConfiguration;
+
+    public PeerConnection.RTCConfiguration getPeerConnectionConfiguration() {
+        return peerConnectionConfiguration;
+    }
+
+    private void setPeerConnectionConfiguration(PeerConnection.RTCConfiguration configuration) {
+        this.peerConnectionConfiguration = configuration;
+    }
+
     public void release() {
         try {
             if (localVideoRenderer != null) {
@@ -187,6 +197,7 @@ public class WebRTCClient {
         };
         
         Log.d(TAG, "Creating peer connection with configuration: " + configuration);
+        setPeerConnectionConfiguration(configuration);
         peerConnection = peerConnectionFactory.createPeerConnection(configuration, observer);
         if (peerConnection != null) {
             Log.d(TAG, "Peer connection created successfully");
