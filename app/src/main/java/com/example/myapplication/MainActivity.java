@@ -94,12 +94,14 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                 roomId = UUID.randomUUID().toString().substring(0, 8);
                 binding.roomIdInput.setText(roomId);
             }
+            final String finalRoomId = roomId;
 
             if (!isScreenSharing) {
+                String finalRoomId1 = roomId;
                 signalingClient.connect(() -> {
                     // Connection established callback
-                    signalingClient.joinRoom(roomId);
-                    Toast.makeText(this, "Connecting to room: " + roomId + "...", Toast.LENGTH_SHORT).show();
+                    signalingClient.joinRoom(finalRoomId);
+                    Toast.makeText(this, String.format("Connecting to room: %s...", finalRoomId1), Toast.LENGTH_SHORT).show();
                     startScreenShare();
                 });
             } else {

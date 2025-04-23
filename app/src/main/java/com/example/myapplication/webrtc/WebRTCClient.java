@@ -95,6 +95,10 @@ public class WebRTCClient {
         return null;
     }
     
+    public PeerConnectionFactory getPeerConnectionFactory() {
+        return peerConnectionFactory;
+    }
+
     public void release() {
         try {
             if (localVideoRenderer != null) {

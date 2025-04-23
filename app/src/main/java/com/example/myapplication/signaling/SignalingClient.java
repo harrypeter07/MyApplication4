@@ -16,6 +16,10 @@ public class SignalingClient {
     private static final String TAG = "SignalingClient";
     private final Context context;
     private static final String SIGNALING_SERVER_URL = "http://192.168.51.36:3000"; // Updated server URL with actual IP
+
+    public String getServerUrl() {
+        return SIGNALING_SERVER_URL;
+    }
     
     private final Socket socket;
     private final SignalingClientListener listener;
