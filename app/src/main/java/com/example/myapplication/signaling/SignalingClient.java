@@ -15,7 +15,7 @@ import io.socket.emitter.Emitter;
 public class SignalingClient {
     private static final String TAG = "SignalingClient";
     private final Context context;
-    private static final String SIGNALING_SERVER_URL = "http://192.168.51.36:3000"; // Updated server URL with actual IP
+    private static final String SIGNALING_SERVER_URL = "http://192.168.92.36:3000"; // Updated server URL with local IP
 
     public String getServerUrl() {
         return SIGNALING_SERVER_URL;

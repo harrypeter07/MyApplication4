@@ -13,6 +13,7 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
+import android.util.Log;
 import android.view.Surface;
 import android.view.WindowManager;
 
@@ -86,23 +87,46 @@ public class ScreenCaptureService extends Service {
     }
     
     public void startProjection(int resultCode, Intent data) {
-        MediaProjectionManager projectionManager = 
-                (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+        try {
+            MediaProjectionManager projectionManager = 
+                    (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            if (projectionManager == null) {
+                Log.e("ScreenCaptureService", "Failed to get MediaProjectionManager");
+                return;
+            }
+            mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+            if (mediaProjection == null) {
+                Log.e("ScreenCaptureService", "Failed to create MediaProjection");
+                return;
+            }
+        } catch (Exception e) {
+            Log.e("ScreenCaptureService", "Error starting projection: " + e.getMessage());
+        }
     }
     
     public void startVirtualDisplay(Surface surface) {
-        this.surface = surface;
-        if (mediaProjection != null) {
-            virtualDisplay = mediaProjection.createVirtualDisplay(
-                    VIRTUAL_DISPLAY_NAME,
-                    width,
-                    height,
-                    density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    surface,
-                    null,
-                    null);
+        try {
+            this.surface = surface;
+            if (mediaProjection != null) {
+                virtualDisplay = mediaProjection.createVirtualDisplay(
+                        VIRTUAL_DISPLAY_NAME,
+                        width,
+                        height,
+                        density,
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        surface,
+                        null,
+                        null);
+                if (virtualDisplay == null) {
+                    Log.e("ScreenCaptureService", "Failed to create virtual display");
+                    return;
+                }
+                Log.d("ScreenCaptureService", "Virtual display created successfully");
+            } else {
+                Log.e("ScreenCaptureService", "MediaProjection is null");
+            }
+        } catch (Exception e) {
+            Log.e("ScreenCaptureService", "Error creating virtual display: " + e.getMessage());
         }
     }
     
@@ -111,17 +135,22 @@ public class ScreenCaptureService extends Service {
     }
     
     public void stopProjection() {
-        if (virtualDisplay != null) {
-            virtualDisplay.release();
-            virtualDisplay = null;
-        }
-        if (mediaProjection != null) {
-            mediaProjection.stop();
-            mediaProjection = null;
-        }
-        if (surface != null) {
-            surface.release();
-            surface = null;
+        try {
+            if (virtualDisplay != null) {
+                virtualDisplay.release();
+                virtualDisplay = null;
+            }
+            if (mediaProjection != null) {
+                mediaProjection.stop();
+                mediaProjection = null;
+            }
+            if (surface != null) {
+                surface.release();
+                surface = null;
+            }
+            Log.d("ScreenCaptureService", "Screen capture stopped successfully");
+        } catch (Exception e) {
+            Log.e("ScreenCaptureService", "Error stopping projection: " + e.getMessage());
         }
     }
     

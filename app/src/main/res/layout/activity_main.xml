@@ -60,8 +60,8 @@
             android:text="Join Room"
             app:layout_constraintTop_toBottomOf="@id/startShareButton" />
 
-        <org.webrtc.SurfaceViewRenderer
-            android:id="@+id/localVideoView"
+        <WebView
+            android:id="@+id/webView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="16dp"

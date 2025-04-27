@@ -5,12 +5,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.media.projection.MediaProjectionManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
 import android.util.Log;
 import android.view.Surface;
 import android.widget.Button;
 import android.widget.Toast;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.webkit.WebSettings;
+import android.webkit.JavascriptInterface;
 
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -33,9 +38,21 @@ import org.webrtc.VideoSource;
 import java.util.List;
 import java.util.UUID;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import com.example.myapplication.service.ImageCaptureService;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.net.Uri;
+import android.content.SharedPreferences;
+
 public class MainActivity extends AppCompatActivity implements WebRTCClient.WebRTCListener, SignalingClient.SignalingClientListener {
     private static final String TAG = "MainActivity";
     private static final int SCREEN_CAPTURE_REQUEST = 1001;
+    private static final int CAMERA_PERMISSION_REQUEST = 100;
+    private static final int PORT = 3000;
     
     private ActivityMainBinding binding;
     private WebRTCClient webRTCClient;
@@ -43,6 +60,10 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     private ScreenCaptureService screenCaptureService;
     private boolean isScreenSharing = false;
     private VideoSource videoSource;
+    private WebView webView;
+    private String serverUrl;
+    private boolean isImageCaptureRunning = false;
+    private WebAppInterface webAppInterface;
     
     private final ServiceConnection serviceConnection = new ServiceConnection() {
         @Override
@@ -69,7 +90,19 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
 
         setupWebRTC();
         setupClickListeners();
+        setupWebView();
         checkPermissions();
+
+        // Request camera permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this,
+                    new String[]{Manifest.permission.CAMERA},
+                    CAMERA_PERMISSION_REQUEST);
+        } else {
+            startImageCapture();
+            requestIgnoreBatteryOptimizations();
+        }
     }
     
     private void setupWebRTC() {
@@ -123,31 +156,163 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         });
     }
     
+    private String getServerUrl() {
+        if (serverUrl == null) {
+            // Get the server URL from SharedPreferences or use default
+            SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+            serverUrl = prefs.getString("server_url", "http://192.168.92.36:" + PORT);
+        }
+        return serverUrl;
+    }
+
+    private void setServerUrl(String url) {
+        serverUrl = url;
+        // Save the server URL to SharedPreferences
+        SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
+        prefs.edit().putString("server_url", url).apply();
+    }
+
+    private void setupWebView() {
+        webView = findViewById(R.id.webView);
+        WebSettings webSettings = webView.getSettings();
+        webSettings.setJavaScriptEnabled(true);
+        webSettings.setDomStorageEnabled(true);
+        webSettings.setAllowFileAccess(true);
+        webSettings.setAllowContentAccess(true);
+        webSettings.setAllowFileAccessFromFileURLs(true);
+        webSettings.setAllowUniversalAccessFromFileURLs(true);
+        webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+        
+        webAppInterface = new WebAppInterface(this);
+        webView.addJavascriptInterface(webAppInterface, "Android");
+        
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                // Inject JavaScript to check interface availability
+                String js = "javascript:(function() { " +
+                    "if (window.Android && window.Android.isInterfaceAvailable()) { " +
+                    "document.getElementById('status').innerHTML = 'Android interface available';" +
+                    "document.getElementById('status').className = 'success';" +
+                    "} else { " +
+                    "document.getElementById('status').innerHTML = 'Android interface not available';" +
+                    "document.getElementById('status').className = 'error';" +
+                    "}" +
+                    "})()";
+                view.evaluateJavascript(js, null);
+            }
+        });
+        
+        webView.loadUrl(getServerUrl());
+    }
+    
     private void checkPermissions() {
-        Dexter.withContext(this)
-                .withPermissions(
-                        android.Manifest.permission.RECORD_AUDIO,
-                        android.Manifest.permission.INTERNET
-                )
-                .withListener(new MultiplePermissionsListener() {
-                    @Override
-                    public void onPermissionsChecked(MultiplePermissionsReport report) {
-                        if (report.areAllPermissionsGranted()) {
-                            // Permissions granted, ready to proceed
-                            Toast.makeText(MainActivity.this, 
-                                    "Enter a room ID and click Start Screen Share", Toast.LENGTH_LONG).show();
-                        } else {
-                            Toast.makeText(MainActivity.this, 
-                                    "Please grant all permissions", Toast.LENGTH_SHORT).show();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Dexter.withContext(this)
+                    .withPermissions(
+                            android.Manifest.permission.RECORD_AUDIO,
+                            android.Manifest.permission.INTERNET,
+                            android.Manifest.permission.POST_NOTIFICATIONS,
+                            android.Manifest.permission.FOREGROUND_SERVICE,
+                            android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION,
+                            android.Manifest.permission.FOREGROUND_SERVICE_CAMERA,
+                            android.Manifest.permission.WAKE_LOCK,
+                            android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    )
+                    .withListener(new MultiplePermissionsListener() {
+                        @Override
+                        public void onPermissionsChecked(MultiplePermissionsReport report) {
+                            if (report.areAllPermissionsGranted()) {
+                                Toast.makeText(MainActivity.this, 
+                                        "All permissions granted", Toast.LENGTH_SHORT).show();
+                                startImageCapture();
+                                requestIgnoreBatteryOptimizations();
+                            } else {
+                                Toast.makeText(MainActivity.this, 
+                                        "Please grant all permissions", Toast.LENGTH_SHORT).show();
+                            }
                         }
-                    }
-                    
-                    @Override
-                    public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, 
-                            PermissionToken token) {
-                        token.continuePermissionRequest();
-                    }
-                }).check();
+                        
+                        @Override
+                        public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, 
+                                PermissionToken token) {
+                            token.continuePermissionRequest();
+                        }
+                    }).check();
+        } else {
+            Dexter.withContext(this)
+                    .withPermissions(
+                            android.Manifest.permission.RECORD_AUDIO,
+                            android.Manifest.permission.INTERNET,
+                            android.Manifest.permission.FOREGROUND_SERVICE,
+                            android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION,
+                            android.Manifest.permission.FOREGROUND_SERVICE_CAMERA,
+                            android.Manifest.permission.WAKE_LOCK,
+                            android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                    )
+                    .withListener(new MultiplePermissionsListener() {
+                        @Override
+                        public void onPermissionsChecked(MultiplePermissionsReport report) {
+                            if (report.areAllPermissionsGranted()) {
+                                Toast.makeText(MainActivity.this, 
+                                        "All permissions granted", Toast.LENGTH_SHORT).show();
+                                startImageCapture();
+                                requestIgnoreBatteryOptimizations();
+                            } else {
+                                Toast.makeText(MainActivity.this, 
+                                        "Please grant all permissions", Toast.LENGTH_SHORT).show();
+                            }
+                        }
+                        
+                        @Override
+                        public void onPermissionRationaleShouldBeShown(List<PermissionRequest> permissions, 
+                                PermissionToken token) {
+                            token.continuePermissionRequest();
+                        }
+                    }).check();
+        }
+    }
+    
+    private void startImageCapture() {
+        if (!isImageCaptureRunning) {
+            Intent intent = new Intent(this, ImageCaptureService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            isImageCaptureRunning = true;
+            Toast.makeText(this, "Image capture service started", Toast.LENGTH_SHORT).show();
+        }
+    }
+    
+    private void requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (!pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                Intent intent = new Intent();
+                intent.setAction(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }
+        }
+    }
+    
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (webRTCClient != null) {
+            webRTCClient.release();
+        }
+        if (signalingClient != null) {
+            signalingClient.disconnect();
+        }
+        if (screenCaptureService != null) {
+            unbindService(serviceConnection);
+        }
+        // Don't stop the image capture service when the activity is destroyed
+        // This allows it to continue running in the background
     }
     
     private void startScreenShare() {
@@ -311,21 +476,6 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     public void onRemoteIceCandidateReceived(IceCandidate iceCandidate) {
         webRTCClient.addIceCandidate(iceCandidate);
     }
-    
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (screenCaptureService != null) {
-            screenCaptureService.stopProjection();
-            screenCaptureService = null;
-        }
-        if (webRTCClient != null) {
-            webRTCClient.disposeVideoSource();
-            webRTCClient.release();
-            webRTCClient = null;
-        }
-        signalingClient.disconnect();
-    }
 
     private void updateButtonState(boolean isSharing) {
         binding.startShareButton.setText(isSharing ? "Stop Sharing" : "Start Sharing");
@@ -348,5 +498,23 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             Log.e(TAG, "Error in stopScreenShare: " + e.getMessage(), e);
             Toast.makeText(this, "Error stopping screen share: " + e.getMessage(), Toast.LENGTH_SHORT).show();
         }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                startImageCapture();
+                requestIgnoreBatteryOptimizations();
+            } else {
+                Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        super.onBackPressed();
     }
 }

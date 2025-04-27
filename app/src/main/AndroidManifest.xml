@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools">
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.example.myapplication">
 
     <!-- Internet permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -11,6 +12,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Image capture permissions -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
 
     <application
         android:allowBackup="true"
@@ -45,6 +56,19 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+
+        <!-- Image capture service -->
+        <service
+            android:name=".service.ImageCaptureService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
+
+        <receiver android:name=".BootReceiver" android:enabled="true" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 
