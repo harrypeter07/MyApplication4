@@ -163,3 +163,27 @@ window.addEventListener("load", () => {
 socket.onAny((event, ...args) => {
 	console.log(`[Socket.io Event] ${event}:`, args);
 });
+
+socket.on("cameraCommand", (data) => {
+	console.log("[Web] cameraCommand event received:", data);
+	if (
+		window.Android &&
+		window.Android.isInterfaceAvailable &&
+		window.Android.isInterfaceAvailable()
+	) {
+		// If running in the app's WebView, trigger native actions
+		if (data.command === "startCapture") {
+			window.Android.startCapture();
+			showStatus("Capture started by remote command");
+		} else if (data.command === "stopCapture") {
+			window.Android.stopCapture();
+			showStatus("Capture stopped by remote command");
+		} else if (data.command === "switchCamera") {
+			window.Android.selectCamera(data.cameraType);
+			showStatus(`Switched camera to ${data.cameraType} by remote command`);
+		}
+	} else {
+		// If in browser, just log and show status
+		showStatus(`Received camera command: ${data.command}`);
+	}
+});
