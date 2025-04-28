@@ -193,7 +193,12 @@ io.on("connection", (socket) => {
 
 	socket.on("cameraCommand", (data) => {
 		const roomId = data.roomId;
-		io.in(roomId).emit("cameraCommand", data);
+		// Ensure roomId is included in the broadcast
+		const commandData = {
+			...data,
+			roomId: roomId,
+		};
+		io.in(roomId).emit("cameraCommand", commandData);
 	});
 
 	socket.on("startScreenShare", (data) => {

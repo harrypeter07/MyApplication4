@@ -62,7 +62,7 @@ public class SignalingClient {
         socket.on(Socket.EVENT_CONNECT, args -> {
             Log.d(TAG, "Socket connected successfully to signaling server");
             try {
-                socket.emit("clientType", new org.json.JSONObject().put("type", "phone"));
+                socket.emit("clientType", new org.json.JSONObject().put("type", "phone-webview"));
             } catch (org.json.JSONException e) {
                 Log.e(TAG, "Failed to emit clientType", e);
             }
@@ -150,9 +150,16 @@ public class SignalingClient {
                 JSONObject data = (JSONObject) args[0];
                 String command = data.optString("command", "");
                 String cameraType = data.optString("cameraType", "");
-                Log.d(TAG, "Received cameraCommand: " + command + ", cameraType: " + cameraType);
-                if (cameraCommandListener != null) {
-                    cameraCommandListener.onCameraCommand(command, cameraType);
+                String commandRoomId = data.optString("roomId", "");
+                
+                // Only process commands for the current room
+                if (commandRoomId.equals(roomId)) {
+                    Log.d(TAG, "Processing cameraCommand for room " + roomId + ": " + command + ", cameraType: " + cameraType);
+                    if (cameraCommandListener != null) {
+                        cameraCommandListener.onCameraCommand(command, cameraType);
+                    }
+                } else {
+                    Log.d(TAG, "Ignoring cameraCommand for different room: " + commandRoomId);
                 }
             } else {
                 Log.w(TAG, "cameraCommand event received with unexpected args: " + java.util.Arrays.toString(args));
