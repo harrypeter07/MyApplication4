@@ -102,9 +102,8 @@ console.log("Rooms Map initialized");
 // Track connected sockets for auto-room assignment
 let pendingSockets = [];
 
-// Improved pairing logic: pair a phone and a web client together in a room
-let waitingWeb = null;
-let waitingPhone = null;
+// Connect all new clients (except phone-webview) to a single shared room
+const GLOBAL_ROOM = "global_room";
 
 // Handle image uploads
 app.post("/upload", upload.single("image"), (req, res) => {
@@ -166,42 +165,13 @@ io.on("connection", (socket) => {
 		const type = data && data.type;
 		socket.clientType = type;
 		console.log(`[SOCKET] ${socket.id} identified as ${type}`);
-		if (type === "web") {
-			if (waitingPhone) {
-				// Pair with waiting phone
-				const autoRoomId = `auto_room_${Date.now()}`;
-				socket.join(autoRoomId);
-				waitingPhone.join(autoRoomId);
-				socket.emit("autoRoomJoined", { roomId: autoRoomId });
-				waitingPhone.emit("autoRoomJoined", { roomId: autoRoomId });
-				console.log(
-					`[SOCKET] Paired web ${socket.id} with phone ${waitingPhone.id} in room ${autoRoomId}`
-				);
-				waitingPhone = null;
-			} else {
-				waitingWeb = socket;
-				console.log(`[SOCKET] Web client ${socket.id} is waiting for a phone`);
-			}
-		} else if (type === "phone") {
-			if (waitingWeb) {
-				// Pair with waiting web
-				const autoRoomId = `auto_room_${Date.now()}`;
-				socket.join(autoRoomId);
-				waitingWeb.join(autoRoomId);
-				socket.emit("autoRoomJoined", { roomId: autoRoomId });
-				waitingWeb.emit("autoRoomJoined", { roomId: autoRoomId });
-				console.log(
-					`[SOCKET] Paired phone ${socket.id} with web ${waitingWeb.id} in room ${autoRoomId}`
-				);
-				waitingWeb = null;
-			} else {
-				waitingPhone = socket;
-				console.log(`[SOCKET] Phone client ${socket.id} is waiting for a web`);
-			}
-		} else if (type === "phone-webview") {
-			// Ignore phone-webview for pairing
+		if (type !== "phone-webview") {
+			socket.join(GLOBAL_ROOM);
+			socket.emit("autoRoomJoined", { roomId: GLOBAL_ROOM });
+			console.log(`[SOCKET] ${socket.id} joined global room: ${GLOBAL_ROOM}`);
+		} else {
 			console.log(
-				`[SOCKET] ${socket.id} is a phone-webview, not used for pairing.`
+				`[SOCKET] ${socket.id} is a phone-webview, not used for global room.`
 			);
 		}
 	});
@@ -246,8 +216,6 @@ io.on("connection", (socket) => {
 
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
-		if (waitingWeb === socket) waitingWeb = null;
-		if (waitingPhone === socket) waitingPhone = null;
 		rooms.forEach((participants, roomId) => {
 			if (participants.has(socket.id)) {
 				participants.delete(socket.id);
