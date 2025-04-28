@@ -61,6 +61,7 @@ public class SignalingClient {
     private void setupSocketEvents() {
         socket.on(Socket.EVENT_CONNECT, args -> {
             Log.d(TAG, "Socket connected successfully to signaling server");
+            socket.emit("clientType", new org.json.JSONObject().put("type", "phone"));
             if (context != null) {
             new android.os.Handler(context.getMainLooper()).post(() -> {
                 Toast.makeText(context, "Connected to signaling server", Toast.LENGTH_SHORT).show();

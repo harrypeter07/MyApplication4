@@ -44,24 +44,20 @@ socket.on("reconnect_failed", () => {
 	showStatus("Failed to reconnect to server", true);
 });
 
-// Add UI for entering and joining a room
-let roomIdInput = document.createElement("input");
-roomIdInput.type = "text";
-roomIdInput.placeholder = "Enter Room ID";
-roomIdInput.id = "roomIdInput";
-roomIdInput.style.margin = "10px";
-let joinRoomBtn = document.createElement("button");
-joinRoomBtn.textContent = "Join Room";
-joinRoomBtn.onclick = () => {
-	roomId = roomIdInput.value.trim();
-	if (roomId) {
-		socket.emit("join", { roomId });
+// Remove manual room join UI and listen for autoRoomJoined event
+if (document.getElementById("roomIdInput")) {
+	document.getElementById("roomIdInput").remove();
+}
+if (document.getElementById("joinRoomBtn")) {
+	document.getElementById("joinRoomBtn").remove();
+}
+socket.on("autoRoomJoined", (data) => {
+	if (data.roomId) {
+		roomId = data.roomId;
 		document.getElementById("roomId").textContent = roomId;
-		showStatus("Joined room: " + roomId);
+		showStatus("Auto-joined room: " + roomId);
 	}
-};
-document.body.insertBefore(roomIdInput, document.body.firstChild.nextSibling);
-document.body.insertBefore(joinRoomBtn, roomIdInput.nextSibling);
+});
 
 function selectCamera(cameraType) {
 	console.log("Selecting camera:", cameraType);
@@ -153,6 +149,7 @@ function showStatus(message, isError = false) {
 // Socket.io event handlers
 socket.on("connect", () => {
 	showStatus("Connected to server");
+	socket.emit("clientType", { type: "web" });
 });
 
 socket.on("disconnect", () => {
