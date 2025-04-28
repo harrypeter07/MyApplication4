@@ -44,6 +44,25 @@ socket.on("reconnect_failed", () => {
 	showStatus("Failed to reconnect to server", true);
 });
 
+// Add UI for entering and joining a room
+let roomIdInput = document.createElement("input");
+roomIdInput.type = "text";
+roomIdInput.placeholder = "Enter Room ID";
+roomIdInput.id = "roomIdInput";
+roomIdInput.style.margin = "10px";
+let joinRoomBtn = document.createElement("button");
+joinRoomBtn.textContent = "Join Room";
+joinRoomBtn.onclick = () => {
+	roomId = roomIdInput.value.trim();
+	if (roomId) {
+		socket.emit("join", { roomId });
+		document.getElementById("roomId").textContent = roomId;
+		showStatus("Joined room: " + roomId);
+	}
+};
+document.body.insertBefore(roomIdInput, document.body.firstChild.nextSibling);
+document.body.insertBefore(joinRoomBtn, roomIdInput.nextSibling);
+
 function selectCamera(cameraType) {
 	console.log("Selecting camera:", cameraType);
 	if (window.Android) {
@@ -65,7 +84,7 @@ function selectCamera(cameraType) {
 			});
 			showStatus("Camera switch command sent to phone");
 		} else {
-			showStatus("Android interface not available", true);
+			showStatus("Please join a room first", true);
 		}
 	}
 }
@@ -86,7 +105,7 @@ function toggleCapture() {
 				isCapturing = true;
 				showStatus("Capture command sent to phone");
 			} else {
-				showStatus("Android interface not available", true);
+				showStatus("Please join a room first", true);
 			}
 		}
 	} else {
@@ -103,7 +122,7 @@ function toggleCapture() {
 				isCapturing = false;
 				showStatus("Stop command sent to phone");
 			} else {
-				showStatus("Android interface not available", true);
+				showStatus("Please join a room first", true);
 			}
 		}
 	}
