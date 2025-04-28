@@ -145,6 +145,7 @@ public class SignalingClient {
         });
 
         socket.on("cameraCommand", args -> {
+            Log.d(TAG, "cameraCommand event received with args: " + java.util.Arrays.toString(args));
             if (args.length > 0 && args[0] instanceof JSONObject) {
                 JSONObject data = (JSONObject) args[0];
                 String command = data.optString("command", "");
@@ -153,6 +154,8 @@ public class SignalingClient {
                 if (cameraCommandListener != null) {
                     cameraCommandListener.onCameraCommand(command, cameraType);
                 }
+            } else {
+                Log.w(TAG, "cameraCommand event received with unexpected args: " + java.util.Arrays.toString(args));
             }
         });
     }
