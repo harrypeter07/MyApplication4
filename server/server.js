@@ -124,9 +124,19 @@ app.post("/upload", upload.single("image"), (req, res) => {
 	}
 });
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+	res.json({ status: "ok", time: new Date().toISOString() });
+});
+
 // Socket.io connection handling
 io.on("connection", (socket) => {
 	console.log("New socket connection:", socket.id);
+
+	// Log all socket events
+	socket.onAny((event, ...args) => {
+		console.log(`[Socket Event] ${event}:`, args);
+	});
 
 	socket.on("join", (data) => {
 		const roomId = data.roomId;

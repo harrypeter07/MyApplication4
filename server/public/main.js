@@ -124,3 +124,8 @@ window.addEventListener("load", () => {
 		showStatus("Android interface not available", true);
 	}
 });
+
+// Log all socket.io events
+socket.onAny((event, ...args) => {
+	console.log(`[Socket.io Event] ${event}:`, args);
+});

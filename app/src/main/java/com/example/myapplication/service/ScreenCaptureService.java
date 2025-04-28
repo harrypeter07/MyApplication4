@@ -51,7 +51,7 @@ public class ScreenCaptureService extends Service {
     private static final int NOTIFICATION_ID = 2;
     private static final int VIRTUAL_DISPLAY_FLAGS = DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR;
     private static final int SCREENSHOT_INTERVAL_MS = 2000; // Capture every 2 seconds
-    private static final String SERVER_URL = "https://imageserver-b9jffdh93-harrypeter07s-projects.vercel.app/upload"; // Replace with your actual Vercel URL
+    private static final String SERVER_URL = "https://myapplication4.onrender.com/upload"; // Updated to Render URL
     
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
