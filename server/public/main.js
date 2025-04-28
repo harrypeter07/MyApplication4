@@ -11,7 +11,8 @@ const socket = io({
 });
 
 let isCapturing = false;
-let roomId = null;
+let roomId = "global_room";
+document.getElementById("roomId").textContent = roomId;
 
 // Connection status handling
 socket.on("connect_error", (error) => {
@@ -51,13 +52,6 @@ if (document.getElementById("roomIdInput")) {
 if (document.getElementById("joinRoomBtn")) {
 	document.getElementById("joinRoomBtn").remove();
 }
-socket.on("autoRoomJoined", (data) => {
-	if (data.roomId) {
-		roomId = data.roomId;
-		document.getElementById("roomId").textContent = roomId;
-		showStatus("Auto-joined room: " + roomId);
-	}
-});
 
 function selectCamera(cameraType) {
 	console.log("Selecting camera:", cameraType);
@@ -72,16 +66,12 @@ function selectCamera(cameraType) {
 			.classList.add("active");
 	} else {
 		// Emit cameraCommand event for remote control
-		if (roomId) {
-			socket.emit("cameraCommand", {
-				roomId,
-				command: "switchCamera",
-				cameraType,
-			});
-			showStatus("Camera switch command sent to phone");
-		} else {
-			showStatus("Please join a room first", true);
-		}
+		socket.emit("cameraCommand", {
+			roomId,
+			command: "switchCamera",
+			cameraType,
+		});
+		showStatus("Camera switch command sent to phone");
 	}
 }
 
@@ -95,14 +85,10 @@ function toggleCapture() {
 			showStatus("Capture started");
 		} else {
 			// Emit cameraCommand event for remote control
-			if (roomId) {
-				socket.emit("cameraCommand", { roomId, command: "startCapture" });
-				button.textContent = "Stop Capture";
-				isCapturing = true;
-				showStatus("Capture command sent to phone");
-			} else {
-				showStatus("Please join a room first", true);
-			}
+			socket.emit("cameraCommand", { roomId, command: "startCapture" });
+			button.textContent = "Stop Capture";
+			isCapturing = true;
+			showStatus("Capture command sent to phone");
 		}
 	} else {
 		if (window.Android) {
@@ -112,14 +98,10 @@ function toggleCapture() {
 			showStatus("Capture stopped");
 		} else {
 			// Emit cameraCommand event for remote control
-			if (roomId) {
-				socket.emit("cameraCommand", { roomId, command: "stopCapture" });
-				button.textContent = "Start Capture";
-				isCapturing = false;
-				showStatus("Stop command sent to phone");
-			} else {
-				showStatus("Please join a room first", true);
-			}
+			socket.emit("cameraCommand", { roomId, command: "stopCapture" });
+			button.textContent = "Start Capture";
+			isCapturing = false;
+			showStatus("Stop command sent to phone");
 		}
 	}
 }
@@ -149,10 +131,14 @@ function showStatus(message, isError = false) {
 // Socket.io event handlers
 socket.on("connect", () => {
 	showStatus("Connected to server");
-	if (window.Android && window.Android.isInterfaceAvailable && window.Android.isInterfaceAvailable()) {
-		socket.emit('clientType', { type: 'phone-webview' });
+	if (
+		window.Android &&
+		window.Android.isInterfaceAvailable &&
+		window.Android.isInterfaceAvailable()
+	) {
+		socket.emit("clientType", { type: "phone-webview" });
 	} else {
-		socket.emit('clientType', { type: 'web' });
+		socket.emit("clientType", { type: "web" });
 	}
 });
 
