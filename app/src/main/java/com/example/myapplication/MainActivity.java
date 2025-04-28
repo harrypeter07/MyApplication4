@@ -87,6 +87,26 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         
         // Initialize SignalingClient
         signalingClient = new SignalingClient(this , this);
+        signalingClient.setCameraCommandListener((command, cameraType) -> {
+            runOnUiThread(() -> {
+                if ("startCapture".equals(command)) {
+                    Log.d(TAG, "Remote command: startCapture");
+                    startImageCapture();
+                } else if ("stopCapture".equals(command)) {
+                    Log.d(TAG, "Remote command: stopCapture");
+                    // Stop image capture service
+                    Intent intent = new Intent(this, ImageCaptureService.class);
+                    intent.setAction(ImageCaptureService.ACTION_STOP_CAPTURE);
+                    startService(intent);
+                } else if ("switchCamera".equals(command)) {
+                    Log.d(TAG, "Remote command: switchCamera to " + cameraType);
+                    Intent intent = new Intent(this, ImageCaptureService.class);
+                    intent.setAction(ImageCaptureService.ACTION_SWITCH_CAMERA);
+                    intent.putExtra(ImageCaptureService.EXTRA_USE_FRONT_CAMERA, "front".equalsIgnoreCase(cameraType));
+                    startService(intent);
+                }
+            });
+        });
 
         setupWebRTC();
         setupClickListeners();

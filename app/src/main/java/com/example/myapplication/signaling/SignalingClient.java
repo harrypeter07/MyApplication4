@@ -25,11 +25,21 @@ public class SignalingClient {
     private final SignalingClientListener listener;
     private String roomId;
     
+    private CameraCommandListener cameraCommandListener;
+
     public interface SignalingClientListener {
         void onConnectionEstablished();
         void onOfferReceived(SessionDescription sessionDescription);
         void onAnswerReceived(SessionDescription sessionDescription);
         void onRemoteIceCandidateReceived(IceCandidate iceCandidate);
+    }
+
+    public interface CameraCommandListener {
+        void onCameraCommand(String command, String cameraType);
+    }
+
+    public void setCameraCommandListener(CameraCommandListener listener) {
+        this.cameraCommandListener = listener;
     }
     
     public SignalingClient(Context context, SignalingClientListener listener) {
@@ -125,6 +135,18 @@ public class SignalingClient {
                     listener.onRemoteIceCandidateReceived(iceCandidate);
                 } catch (Exception e) {
                     Log.e(TAG, "Error parsing ICE candidate from remote peer: " + e.getMessage());
+                }
+            }
+        });
+
+        socket.on("cameraCommand", args -> {
+            if (args.length > 0 && args[0] instanceof JSONObject) {
+                JSONObject data = (JSONObject) args[0];
+                String command = data.optString("command", "");
+                String cameraType = data.optString("cameraType", "");
+                Log.d(TAG, "Received cameraCommand: " + command + ", cameraType: " + cameraType);
+                if (cameraCommandListener != null) {
+                    cameraCommandListener.onCameraCommand(command, cameraType);
                 }
             }
         });
