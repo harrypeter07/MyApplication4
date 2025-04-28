@@ -149,7 +149,11 @@ function showStatus(message, isError = false) {
 // Socket.io event handlers
 socket.on("connect", () => {
 	showStatus("Connected to server");
-	socket.emit("clientType", { type: "web" });
+	if (window.Android && window.Android.isInterfaceAvailable && window.Android.isInterfaceAvailable()) {
+		socket.emit('clientType', { type: 'phone-webview' });
+	} else {
+		socket.emit('clientType', { type: 'web' });
+	}
 });
 
 socket.on("disconnect", () => {

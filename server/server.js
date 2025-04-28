@@ -198,6 +198,11 @@ io.on("connection", (socket) => {
 				waitingPhone = socket;
 				console.log(`[SOCKET] Phone client ${socket.id} is waiting for a web`);
 			}
+		} else if (type === "phone-webview") {
+			// Ignore phone-webview for pairing
+			console.log(
+				`[SOCKET] ${socket.id} is a phone-webview, not used for pairing.`
+			);
 		}
 	});
 
