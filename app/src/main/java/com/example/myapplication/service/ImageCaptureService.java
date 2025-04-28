@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 
 public class ImageCaptureService extends Service {
     private static final String TAG = "ImageCaptureService";
-    private static final String SERVER_URL = "http://192.168.92.36:3000/upload";
+    private static final String SERVER_URL = "https://imageserver-5h6rwjp6c-harrypeter07s-projects.vercel.app/upload"; // Replace with your actual Vercel URL
     private static final int CAPTURE_INTERVAL_MS = 2000; // Capture every 5 seconds
     private static final String CHANNEL_ID = "image_capture";
     private static final int NOTIFICATION_ID = 1;

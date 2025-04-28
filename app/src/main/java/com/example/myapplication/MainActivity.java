@@ -160,7 +160,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         if (serverUrl == null) {
             // Get the server URL from SharedPreferences or use default
             SharedPreferences prefs = getSharedPreferences("app_prefs", MODE_PRIVATE);
-            serverUrl = prefs.getString("server_url", "http://192.168.92.36:" + PORT);
+            serverUrl = prefs.getString("server_url", "https://imageserver-5h6rwjp6c-harrypeter07s-projects.vercel.app");
         }
         return serverUrl;
     }
@@ -204,6 +204,8 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             }
         });
         
+        // Set the server URL
+        setServerUrl("https://imageserver-5h6rwjp6c-harrypeter07s-projects.vercel.app/");
         webView.loadUrl(getServerUrl());
     }
     

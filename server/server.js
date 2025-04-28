@@ -4,9 +4,45 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const cors = require("cors");
+const http = require("http");
+const { Server } = require("socket.io");
+
+console.log("Server starting...");
+
+// Create HTTP server first
+const server = http.createServer(app);
+
+// Enable CORS for all routes
+app.use(
+	cors({
+		origin: "*",
+		methods: ["GET", "POST", "OPTIONS"],
+		credentials: true,
+		allowedHeaders: ["Content-Type", "Authorization"],
+	})
+);
+console.log("CORS middleware added");
+
+// Initialize Socket.IO with CORS configuration
+const io = new Server(server, {
+	cors: {
+		origin: "*",
+		methods: ["GET", "POST", "OPTIONS"],
+		credentials: true,
+		allowedHeaders: ["Content-Type", "Authorization"],
+	},
+	allowEIO3: true,
+	pingTimeout: 60000,
+	pingInterval: 25000,
+	transports: ["websocket", "polling"],
+	path: "/socket.io/",
+});
+console.log("Socket.IO initialized");
 
 // Function to get local IP addresses
 function getLocalIPs() {
+	console.log("Getting local IPs...");
 	const interfaces = os.networkInterfaces();
 	const addresses = [];
 
@@ -18,190 +54,119 @@ function getLocalIPs() {
 			}
 		}
 	}
+	console.log("Local IPs found:", addresses);
 	return addresses;
 }
 
 // Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, "public", "uploads");
-if (!fs.existsSync(uploadsDir)) {
-	fs.mkdirSync(uploadsDir, { recursive: true });
+const uploadsDir = path.join(__dirname, "uploads");
+console.log("Uploads directory path:", uploadsDir);
+
+try {
+	if (!fs.existsSync(uploadsDir)) {
+		console.log("Creating uploads directory...");
+		fs.mkdirSync(uploadsDir, { recursive: true });
+		console.log("Uploads directory created successfully");
+	} else {
+		console.log("Uploads directory already exists");
+	}
+} catch (error) {
+	console.error("Error creating uploads directory:", error);
 }
 
 // Configure multer for image uploads
 const storage = multer.diskStorage({
 	destination: function (req, file, cb) {
+		console.log("Multer destination called for file:", file.originalname);
 		cb(null, uploadsDir);
 	},
 	filename: function (req, file, cb) {
-		cb(null, Date.now() + "-" + file.originalname);
+		const filename = Date.now() + "-" + file.originalname;
+		console.log("Generated filename:", filename);
+		cb(null, filename);
 	},
 });
 
 const upload = multer({ storage: storage });
+console.log("Multer configured");
 
 // Serve static files from public directory
-app.use(express.static("public"));
-app.use("/uploads", express.static("public/uploads"));
-
-// Create HTTP server
-const server = require("http").createServer(app);
-const io = require("socket.io")(server, {
-	cors: {
-		origin: "*",
-		methods: ["GET", "POST"],
-	},
-});
-
-const PORT = process.env.PORT || 3000;
+app.use(express.static(path.join(__dirname, "public")));
+app.use("/uploads", express.static(uploadsDir));
+console.log("Static file serving configured");
 
 // Store active rooms and their participants
 const rooms = new Map();
-
-// Serve the main page
-app.get("/", (req, res) => {
-	res.sendFile(path.join(__dirname, "public", "index.html"));
-});
+console.log("Rooms Map initialized");
 
 // Handle image uploads
 app.post("/upload", upload.single("image"), (req, res) => {
+	console.log("POST /upload request received");
+	console.log("Request body:", req.body);
+	console.log("Request file:", req.file);
+
 	if (!req.file) {
+		console.log("No file uploaded");
 		return res.status(400).send("No file uploaded");
 	}
 
 	const imageUrl = `/uploads/${req.file.filename}`;
 	console.log("Image uploaded:", imageUrl);
 
-	// Notify all connected clients about the new image
-	io.emit("new-image", { url: imageUrl });
-
-	res.json({ success: true, url: imageUrl });
+	try {
+		// Notify all connected clients about the new image
+		io.emit("new-image", { url: imageUrl });
+		console.log("New image notification sent to all clients");
+		res.json({ success: true, url: imageUrl });
+	} catch (error) {
+		console.error("Error handling upload:", error);
+		res.status(500).json({ success: false, error: error.message });
+	}
 });
 
 // Socket.io connection handling
 io.on("connection", (socket) => {
-	console.log("A user connected:", socket.id);
+	console.log("New socket connection:", socket.id);
 
 	socket.on("join", (data) => {
 		const roomId = data.roomId;
 		console.log("User", socket.id, "joining room:", roomId);
 
-		// Join the room
-		socket.join(roomId);
-
-		// Initialize room if it doesn't exist
-		if (!rooms.has(roomId)) {
-			rooms.set(roomId, new Set());
+		try {
+			socket.join(roomId);
+			if (!rooms.has(roomId)) {
+				rooms.set(roomId, new Set());
+			}
+			rooms.get(roomId).add(socket.id);
+			socket.to(roomId).emit("user-joined", { userId: socket.id });
+		} catch (error) {
+			console.error("Error in join handler:", error);
 		}
-		rooms.get(roomId).add(socket.id);
-
-		// Notify other participants in the room
-		socket.to(roomId).emit("user-joined", { userId: socket.id });
 	});
 
-	// Handle camera selection
-	socket.on("selectCamera", (data) => {
-		const { roomId, cameraType } = data;
-		console.log("Camera selection in room", roomId, ":", cameraType);
-
-		// Broadcast camera selection to all clients in the room
-		socket.to(roomId).emit("cameraSelected", {
-			cameraType: cameraType,
-			userId: socket.id,
-		});
-	});
-
-	// Handle start capture
-	socket.on("startCapture", (data) => {
-		const { roomId, cameraType } = data;
-		console.log("Start capture in room", roomId, "with camera:", cameraType);
-
-		// Broadcast start capture to all clients in the room
-		socket.to(roomId).emit("captureStarted", {
-			cameraType: cameraType,
-			userId: socket.id,
-		});
-	});
-
-	// Handle stop capture
-	socket.on("stopCapture", (data) => {
-		const { roomId } = data;
-		console.log("Stop capture in room", roomId);
-
-		// Broadcast stop capture to all clients in the room
-		socket.to(roomId).emit("captureStopped", {
-			userId: socket.id,
-		});
-	});
-
-	// Handle WebRTC signaling
-	socket.on("offer", (data) => {
-		console.log("Received offer from:", socket.id);
-		socket.to(data.roomId).emit("offer", data);
-	});
-
-	socket.on("screen-offer", (data) => {
-		console.log("Received screen offer from:", socket.id);
-		socket.to(data.roomId).emit("screen-offer", data);
-	});
-
-	socket.on("screen-answer", (data) => {
-		console.log("Received screen answer from:", socket.id);
-		socket.to(data.roomId).emit("screen-answer", data);
-	});
-
-	socket.on("screen-ice-candidate", (data) => {
-		console.log("Received screen ICE candidate from:", socket.id);
-		socket.to(data.roomId).emit("screen-ice-candidate", data);
-	});
-
-	socket.on("join-screen", (data) => {
-		const roomId = data.roomId;
-		socket.join(roomId);
-		console.log("Viewer joined screen sharing room:", roomId);
-	});
-
-	socket.on("answer", (data) => {
-		console.log("Received answer from:", socket.id);
-		socket.to(data.roomId).emit("answer", data);
-	});
-
-	socket.on("ice-candidate", (data) => {
-		console.log("Received ICE candidate from:", socket.id);
-		socket.to(data.roomId).emit("ice-candidate", data);
-	});
-
-	// Handle camera commands
 	socket.on("cameraCommand", (data) => {
-		console.log("Received camera command:", data);
-
-		// Log the command details for debugging
-		console.log(
-			`Command: ${data.command}, Camera Type: ${
-				data.cameraType || "N/A"
-			}, Room: ${data.roomId}`
-		);
-
-		// Broadcast the command to all clients in the same room
-		// This includes the sender, so the Android app will receive it
-		io.to(data.roomId).emit("cameraCommand", data);
-
-		// Also emit to all clients for testing
-		io.emit("cameraCommand", data);
+		const roomId = data.roomId;
+		socket.to(roomId).emit("cameraCommand", data);
 	});
 
-	// Handle disconnection
+	socket.on("startScreenShare", (data) => {
+		const roomId = data.roomId;
+		console.log("Starting screen share in room:", roomId);
+		socket.to(roomId).emit("screenShareStarted", { userId: socket.id });
+	});
+
+	socket.on("stopScreenShare", (data) => {
+		const roomId = data.roomId;
+		console.log("Stopping screen share in room:", roomId);
+		socket.to(roomId).emit("screenShareStopped", { userId: socket.id });
+	});
+
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
-
-		// Remove user from all rooms they were in
 		rooms.forEach((participants, roomId) => {
 			if (participants.has(socket.id)) {
 				participants.delete(socket.id);
-
-				// Notify other participants
 				socket.to(roomId).emit("user-left", { userId: socket.id });
-
-				// Remove room if empty
 				if (participants.size === 0) {
 					rooms.delete(roomId);
 				}
@@ -211,7 +176,8 @@ io.on("connection", (socket) => {
 });
 
 // Start server
-const HOST = "0.0.0.0"; // Listen on all network interfaces
+const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || "0.0.0.0";
 server.listen(PORT, HOST, () => {
 	console.log(`Server running on port ${PORT}`);
 	console.log("Available on:");
@@ -219,3 +185,14 @@ server.listen(PORT, HOST, () => {
 		console.log(`  http://${ip}:${PORT}`);
 	});
 });
+
+// Vercel serverless function handler
+module.exports = (req, res) => {
+	if (req.url.startsWith("/socket.io/")) {
+		// Handle Socket.IO requests
+		server.emit("request", req, res);
+	} else {
+		// Handle regular HTTP requests
+		app(req, res);
+	}
+};

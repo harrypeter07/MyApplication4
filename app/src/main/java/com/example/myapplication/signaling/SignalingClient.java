@@ -15,7 +15,7 @@ import io.socket.emitter.Emitter;
 public class SignalingClient {
     private static final String TAG = "SignalingClient";
     private final Context context;
-    private static final String SIGNALING_SERVER_URL = "http://192.168.92.36:3000"; // Updated server URL with local IP
+    private static final String SIGNALING_SERVER_URL = "https://imageserver-b9jffdh93-harrypeter07s-projects.vercel.app"; // Replace with your actual Vercel URL
 
     public String getServerUrl() {
         return SIGNALING_SERVER_URL;
