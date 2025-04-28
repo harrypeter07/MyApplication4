@@ -165,15 +165,9 @@ io.on("connection", (socket) => {
 		const type = data && data.type;
 		socket.clientType = type;
 		console.log(`[SOCKET] ${socket.id} identified as ${type}`);
-		if (type !== "phone-webview") {
-			socket.join(GLOBAL_ROOM);
-			socket.emit("autoRoomJoined", { roomId: GLOBAL_ROOM });
-			console.log(`[SOCKET] ${socket.id} joined global room: ${GLOBAL_ROOM}`);
-		} else {
-			console.log(
-				`[SOCKET] ${socket.id} is a phone-webview, not used for global room.`
-			);
-		}
+		socket.join(GLOBAL_ROOM);
+		socket.emit("autoRoomJoined", { roomId: GLOBAL_ROOM });
+		console.log(`[SOCKET] ${socket.id} joined global room: ${GLOBAL_ROOM}`);
 	});
 
 	// Log all socket events
