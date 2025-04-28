@@ -67,6 +67,20 @@ public class WebAppInterface {
     }
 
     @JavascriptInterface
+    public void deleteImages() {
+        Log.d(TAG, "Deleting all images");
+        try {
+            Intent intent = new Intent(context, ImageCaptureService.class);
+            intent.setAction(ImageCaptureService.ACTION_DELETE_IMAGES);
+            context.startService(intent);
+            showToast("Deleting all captured images");
+        } catch (Exception e) {
+            Log.e(TAG, "Error deleting images", e);
+            showToast("Error deleting images: " + e.getMessage());
+        }
+    }
+
+    @JavascriptInterface
     public String getInterfaceVersion() {
         return "1.0";
     }

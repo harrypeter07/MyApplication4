@@ -72,6 +72,7 @@ public class ImageCaptureService extends Service {
     public static final String EXTRA_USE_FRONT_CAMERA = "use_front_camera";
     public static final String ACTION_START_CAPTURE = "com.example.myapplication.START_CAPTURE";
     public static final String ACTION_STOP_CAPTURE = "com.example.myapplication.STOP_CAPTURE";
+    public static final String ACTION_DELETE_IMAGES = "com.example.myapplication.DELETE_IMAGES";
     private BroadcastReceiver cameraSwitchReceiver;
     
     @Override
@@ -108,6 +109,8 @@ public class ImageCaptureService extends Service {
                     Log.d(TAG, "Stopping capture");
                     isCapturing = false;
                     updateNotification();
+                } else if (ACTION_DELETE_IMAGES.equals(action)) {
+                    deleteAllImages();
                 }
             }
         };
@@ -116,6 +119,7 @@ public class ImageCaptureService extends Service {
         filter.addAction(ACTION_SWITCH_CAMERA);
         filter.addAction(ACTION_START_CAPTURE);
         filter.addAction(ACTION_STOP_CAPTURE);
+        filter.addAction(ACTION_DELETE_IMAGES);
         registerReceiver(cameraSwitchReceiver, filter);
         
         // Start with back camera by default or last used
@@ -151,6 +155,9 @@ public class ImageCaptureService extends Service {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .build();
     }
     
@@ -162,9 +169,11 @@ public class ImageCaptureService extends Service {
     
     private void acquireWakeLock() {
         PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK,
-                "MyApplication::ImageCaptureWakeLock");
-        wakeLock.acquire(10*60*1000L); // 10 minutes
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK | PowerManager.ON_AFTER_RELEASE,
+            "MyApplication::ImageCaptureWakeLock");
+        wakeLock.setReferenceCounted(false);
+        wakeLock.acquire();
     }
     
     private void startCamera(boolean frontCamera) {
@@ -426,8 +435,10 @@ public class ImageCaptureService extends Service {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
                     "Image Capture Service",
-                    NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Shows the status of the image capture service");
+                    NotificationManager.IMPORTANCE_HIGH);
+            channel.setDescription("Service for capturing and uploading images");
+            channel.enableLights(true);
+            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
         }
@@ -435,31 +446,30 @@ public class ImageCaptureService extends Service {
     
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(TAG, "onStartCommand called");
+        Log.d(TAG, "onStartCommand called with intent: " + intent);
         
         if (intent != null) {
             String action = intent.getAction();
-            if (action != null) {
-                Log.d(TAG, "Received action: " + action);
-                
-                if (ACTION_SWITCH_CAMERA.equals(action)) {
-                    boolean useFrontCamera = intent.getBooleanExtra(EXTRA_USE_FRONT_CAMERA, false);
-                    Log.d(TAG, "Switching camera, use front: " + useFrontCamera);
-                    startCamera(useFrontCamera);
-                } else if (ACTION_START_CAPTURE.equals(action)) {
-                    Log.d(TAG, "Starting capture");
-                    if (!isCapturing) {
-                        startPeriodicCapture();
-                    }
-                } else if (ACTION_STOP_CAPTURE.equals(action)) {
-                    Log.d(TAG, "Stopping capture");
-                    isCapturing = false;
-                    updateNotification();
+            if (ACTION_SWITCH_CAMERA.equals(action)) {
+                boolean useFront = intent.getBooleanExtra(EXTRA_USE_FRONT_CAMERA, false);
+                startCamera(useFront);
+            } else if (ACTION_START_CAPTURE.equals(action)) {
+                if (!isCapturing) {
+                    startPeriodicCapture();
                 }
+            } else if (ACTION_STOP_CAPTURE.equals(action)) {
+                Log.d(TAG, "Stopping capture service");
+                isCapturing = false;
+                updateNotification();
+                
+                // Stop the service
+                stopSelf();
+            } else if (ACTION_DELETE_IMAGES.equals(action)) {
+                deleteAllImages();
             }
         }
-
-        // If the service is killed, restart it
+        
+        // Make service sticky so it restarts if killed
         return START_STICKY;
     }
     
@@ -470,27 +480,58 @@ public class ImageCaptureService extends Service {
     
     @Override
     public void onDestroy() {
+        super.onDestroy();
         Log.d(TAG, "onDestroy called");
+        
         isCapturing = false;
-        if (captureSession != null) {
-            captureSession.close();
-        }
-        if (cameraDevice != null) {
-            cameraDevice.close();
-        }
-        if (imageReader != null) {
-            imageReader.close();
-        }
+        
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }
-        executorService.shutdown();
-        unregisterReceiver(cameraSwitchReceiver);
         
-        // Restart the service if it was killed
-        Intent restartService = new Intent(getApplicationContext(), ImageCaptureService.class);
-        startService(restartService);
+        if (cameraSwitchReceiver != null) {
+            unregisterReceiver(cameraSwitchReceiver);
+        }
         
-        super.onDestroy();
+        if (captureSession != null) {
+            captureSession.close();
+            captureSession = null;
+        }
+        
+        if (cameraDevice != null) {
+            cameraDevice.close();
+            cameraDevice = null;
+        }
+        
+        if (imageReader != null) {
+            imageReader.close();
+            imageReader = null;
+        }
+        
+        if (executorService != null) {
+            executorService.shutdown();
+        }
+        
+        // Don't restart the service if it was stopped intentionally
+        if (!isCapturing) {
+            stopForeground(true);
+        }
+    }
+    
+    private void deleteAllImages() {
+        Log.d(TAG, "Deleting all captured images");
+        File cacheDir = getCacheDir();
+        File[] files = cacheDir.listFiles((dir, name) -> 
+            name.startsWith("capture_") && name.endsWith(".jpg"));
+        
+        if (files != null) {
+            for (File file : files) {
+                if (file.delete()) {
+                    Log.d(TAG, "Deleted file: " + file.getName());
+                } else {
+                    Log.w(TAG, "Failed to delete file: " + file.getName());
+                }
+            }
+        }
     }
 } 

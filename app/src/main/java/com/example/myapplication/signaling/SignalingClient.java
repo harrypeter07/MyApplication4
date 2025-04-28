@@ -156,7 +156,12 @@ public class SignalingClient {
                 if (commandRoomId.equals(roomId)) {
                     Log.d(TAG, "Processing cameraCommand for room " + roomId + ": " + command + ", cameraType: " + cameraType);
                     if (cameraCommandListener != null) {
-                        cameraCommandListener.onCameraCommand(command, cameraType);
+                        if (command.equals("deleteImages")) {
+                            // For delete command, pass empty string as camera type
+                            cameraCommandListener.onCameraCommand(command, "");
+                        } else {
+                            cameraCommandListener.onCameraCommand(command, cameraType);
+                        }
                     }
                 } else {
                     Log.d(TAG, "Ignoring cameraCommand for different room: " + commandRoomId);

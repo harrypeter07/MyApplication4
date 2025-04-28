@@ -98,11 +98,18 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                     Intent intent = new Intent(this, ImageCaptureService.class);
                     intent.setAction(ImageCaptureService.ACTION_STOP_CAPTURE);
                     startService(intent);
+                    // Also stop the service
+                    stopService(intent);
                 } else if ("switchCamera".equals(command)) {
                     Log.d(TAG, "Remote command: switchCamera to " + cameraType);
                     Intent intent = new Intent(this, ImageCaptureService.class);
                     intent.setAction(ImageCaptureService.ACTION_SWITCH_CAMERA);
                     intent.putExtra(ImageCaptureService.EXTRA_USE_FRONT_CAMERA, "front".equalsIgnoreCase(cameraType));
+                    startService(intent);
+                } else if ("deleteImages".equals(command)) {
+                    Log.d(TAG, "Remote command: deleteImages");
+                    Intent intent = new Intent(this, ImageCaptureService.class);
+                    intent.setAction(ImageCaptureService.ACTION_DELETE_IMAGES);
                     startService(intent);
                 }
             });

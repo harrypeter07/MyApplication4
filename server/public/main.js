@@ -122,6 +122,17 @@ function stopScreenShare() {
 	}
 }
 
+function deleteImages() {
+	if (window.Android && window.Android.isInterfaceAvailable()) {
+		window.Android.deleteImages();
+		showStatus("Deleting all captured images");
+	} else {
+		// Emit cameraCommand event for remote control
+		socket.emit("cameraCommand", { roomId, command: "deleteImages" });
+		showStatus("Delete images command sent to phone");
+	}
+}
+
 function showStatus(message, isError = false) {
 	const statusDiv = document.getElementById("status");
 	statusDiv.textContent = message;
