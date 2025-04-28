@@ -193,7 +193,7 @@ io.on("connection", (socket) => {
 
 	socket.on("cameraCommand", (data) => {
 		const roomId = data.roomId;
-		socket.to(roomId).emit("cameraCommand", data);
+		io.in(roomId).emit("cameraCommand", data);
 	});
 
 	socket.on("startScreenShare", (data) => {
