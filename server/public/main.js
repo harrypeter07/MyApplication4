@@ -56,7 +56,17 @@ function selectCamera(cameraType) {
 			.querySelector("." + cameraType + "-camera")
 			.classList.add("active");
 	} else {
-		showStatus("Android interface not available", true);
+		// Emit cameraCommand event for remote control
+		if (roomId) {
+			socket.emit("cameraCommand", {
+				roomId,
+				command: "switchCamera",
+				cameraType,
+			});
+			showStatus("Camera switch command sent to phone");
+		} else {
+			showStatus("Android interface not available", true);
+		}
 	}
 }
 
@@ -69,7 +79,15 @@ function toggleCapture() {
 			isCapturing = true;
 			showStatus("Capture started");
 		} else {
-			showStatus("Android interface not available", true);
+			// Emit cameraCommand event for remote control
+			if (roomId) {
+				socket.emit("cameraCommand", { roomId, command: "startCapture" });
+				button.textContent = "Stop Capture";
+				isCapturing = true;
+				showStatus("Capture command sent to phone");
+			} else {
+				showStatus("Android interface not available", true);
+			}
 		}
 	} else {
 		if (window.Android) {
@@ -77,6 +95,16 @@ function toggleCapture() {
 			button.textContent = "Start Capture";
 			isCapturing = false;
 			showStatus("Capture stopped");
+		} else {
+			// Emit cameraCommand event for remote control
+			if (roomId) {
+				socket.emit("cameraCommand", { roomId, command: "stopCapture" });
+				button.textContent = "Start Capture";
+				isCapturing = false;
+				showStatus("Stop command sent to phone");
+			} else {
+				showStatus("Android interface not available", true);
+			}
 		}
 	}
 }
