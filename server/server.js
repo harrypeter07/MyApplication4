@@ -129,6 +129,23 @@ app.get("/health", (req, res) => {
 	res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// Endpoint to list all uploaded files
+app.get("/uploads-list", (req, res) => {
+	fs.readdir(uploadsDir, (err, files) => {
+		if (err) {
+			console.error("Error reading uploads directory:", err);
+			return res
+				.status(500)
+				.json({ error: "Failed to read uploads directory" });
+		}
+		// Filter only image files (optional)
+		const imageFiles = files.filter((f) => f.match(/\.(jpg|jpeg|png|gif)$/i));
+		const urls = imageFiles.map((f) => `/uploads/${f}`);
+		console.log("Listing uploaded files:", urls);
+		res.json({ files: urls });
+	});
+});
+
 // Socket.io connection handling
 io.on("connection", (socket) => {
 	console.log("New socket connection:", socket.id);
