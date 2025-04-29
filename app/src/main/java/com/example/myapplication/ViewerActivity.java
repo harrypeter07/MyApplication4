@@ -1,5 +1,6 @@
 package com.example.myapplication;
 
+import android.content.Intent;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
@@ -7,6 +8,7 @@ import android.util.Log;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.myapplication.databinding.ActivityViewerBinding;
+import com.example.myapplication.service.ImageCaptureService;
 import com.example.myapplication.signaling.SignalingClient;
 import com.example.myapplication.webrtc.WebRTCClient;
 
@@ -53,8 +55,51 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
         webRTCClient.initialize();
         Log.d(TAG, "WebRTC initialization completed. PeerConnectionFactory: " + webRTCClient.getPeerConnectionFactory());
         Log.d(TAG, "Creating signaling client");
-        signalingClient = new SignalingClient(this , this);
-        Log.d(TAG, "Signaling client created. Server URL: " + signalingClient.getServerUrl());
+        signalingClient = new SignalingClient(this, new SignalingClient.SignalingClientListener() {
+            @Override
+            public void onConnectionEstablished() {
+                Log.d(TAG, "Connection established");
+                runOnUiThread(() -> {
+                    // Start camera when connection is established
+                    sendBroadcastCommand(ImageCaptureService.ACTION_START_CAPTURE);
+                });
+            }
+
+            @Override
+            public void onOfferReceived(SessionDescription sessionDescription) {
+                Log.d(TAG, "Offer received");
+                webRTCClient.setRemoteDescription(sessionDescription);
+                webRTCClient.createAnswer();
+            }
+
+            @Override
+            public void onAnswerReceived(SessionDescription sessionDescription) {
+                Log.d(TAG, "Answer received");
+                webRTCClient.setRemoteDescription(sessionDescription);
+            }
+
+            @Override
+            public void onRemoteIceCandidateReceived(IceCandidate iceCandidate) {
+                Log.d(TAG, "Remote ICE candidate received");
+                webRTCClient.addIceCandidate(iceCandidate);
+            }
+        });
+
+        // Set camera command listener
+        signalingClient.setCameraCommandListener((command, cameraType) -> {
+            Log.d(TAG, "Camera command received: " + command + ", type: " + cameraType);
+            runOnUiThread(() -> {
+                if ("switch".equals(command)) {
+                    boolean useFrontCamera = "front".equals(cameraType);
+                    sendBroadcastCommand(ImageCaptureService.ACTION_SWITCH_CAMERA, useFrontCamera);
+                } else if ("start".equals(command)) {
+                    sendBroadcastCommand(ImageCaptureService.ACTION_START_CAPTURE);
+                } else if ("stop".equals(command)) {
+                    sendBroadcastCommand(ImageCaptureService.ACTION_STOP_CAPTURE);
+                }
+            });
+        });
+        Log.d(TAG, "Signaling client created");
         
         SurfaceViewRenderer remoteVideoView = binding.remoteVideoView;
         remoteVideoView.init(webRTCClient.getEglBaseContext(), null);
@@ -141,5 +186,19 @@ public class ViewerActivity extends AppCompatActivity implements WebRTCClient.We
         Log.d(TAG, "Device Info - Model: " + deviceModel 
             + ", OS: " + osVersion
             + ", Manufacturer: " + manufacturer);
+    }
+
+    private void sendBroadcastCommand(String action) {
+        sendBroadcastCommand(action, false);
+    }
+
+    private void sendBroadcastCommand(String action, boolean useFrontCamera) {
+        Intent intent = new Intent(action);
+        if (action.equals(ImageCaptureService.ACTION_SWITCH_CAMERA)) {
+            intent.putExtra(ImageCaptureService.EXTRA_USE_FRONT_CAMERA, useFrontCamera);
+        }
+        Log.d(TAG, "Sending broadcast: " + action + (action.equals(ImageCaptureService.ACTION_SWITCH_CAMERA) ? 
+            " (Front camera: " + useFrontCamera + ")" : ""));
+        sendBroadcast(intent);
     }
 }

