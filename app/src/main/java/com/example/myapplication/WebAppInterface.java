@@ -85,6 +85,14 @@ public class WebAppInterface {
         return "1.0";
     }
 
+    @JavascriptInterface
+    public void startScreenCapture() {
+        Log.d(TAG, "Requesting screen capture from JS");
+        if (context instanceof MainActivity) {
+            ((MainActivity) context).requestScreenCapturePermission();
+        }
+    }
+
     private void showToast(final String message) {
         android.os.Handler mainHandler = new android.os.Handler(context.getMainLooper());
         mainHandler.post(() -> Toast.makeText(context, message, Toast.LENGTH_SHORT).show());
