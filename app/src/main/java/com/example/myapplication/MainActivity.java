@@ -48,7 +48,7 @@ import android.provider.Settings;
 import android.net.Uri;
 import android.content.SharedPreferences;
 
-public class MainActivity extends AppCompatActivity implements WebRTCClient.WebRTCListener, SignalingClient.SignalingClientListener {
+public class MainActivity extends AppCompatActivity implements WebRTCClient.WebRTCListener, SignalingClient.SignalingClientListener, SignalingClient.ScreenCaptureCommandListener {
     private static final String TAG = "MainActivity";
     private static final int SCREEN_CAPTURE_REQUEST = 1001;
     private static final int CAMERA_PERMISSION_REQUEST = 100;
@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         setSupportActionBar(binding.toolbar);
         
         // Initialize SignalingClient
-        signalingClient = new SignalingClient(this , this);
+        signalingClient = new SignalingClient(this, this);
         signalingClient.setCameraCommandListener((command, cameraType) -> {
             runOnUiThread(() -> {
                 if ("startCapture".equals(command)) {
@@ -111,6 +111,10 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                     Intent intent = new Intent(this, ImageCaptureService.class);
                     intent.setAction(ImageCaptureService.ACTION_DELETE_IMAGES);
                     startService(intent);
+                } else if ("screenCapture".equals(command)) {
+                    Log.d(TAG, "Remote command: screenCapture");
+                    Toast.makeText(this, "Screen capture command received", Toast.LENGTH_SHORT).show();
+                    requestScreenCapturePermission();
                 }
             });
         });
@@ -551,5 +555,13 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         MediaProjectionManager mediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         Intent permissionIntent = mediaProjectionManager.createScreenCaptureIntent();
         startActivityForResult(permissionIntent, SCREEN_CAPTURE_REQUEST);
+    }
+
+    @Override
+    public void onScreenCaptureCommand() {
+        runOnUiThread(() -> {
+            Toast.makeText(this, "Screen capture command received", Toast.LENGTH_SHORT).show();
+            requestScreenCapturePermission();
+        });
     }
 }

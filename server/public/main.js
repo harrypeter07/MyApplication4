@@ -208,3 +208,13 @@ function startScreenCapture() {
 		showStatus("Screen capture command sent to phone");
 	}
 }
+
+function triggerScreenCaptureImage() {
+	if (window.Android && window.Android.isInterfaceAvailable()) {
+		window.Android.startScreenCapture();
+		showStatus("Screen capture requested");
+	} else {
+		socket.emit("cameraCommand", { roomId, command: "screenCapture" });
+		showStatus("Screen capture command sent to phone");
+	}
+}

@@ -41,6 +41,10 @@ public class SignalingClient {
         void onCameraCommand(String command, String cameraType);
     }
 
+    public interface ScreenCaptureCommandListener {
+        void onScreenCaptureCommand();
+    }
+
     public SignalingClient(Context context, SignalingClientListener listener) {
         this.context = context;
         this.listener = listener;
@@ -145,6 +149,15 @@ public class SignalingClient {
             } catch (JSONException e) {
                 Log.e(TAG, "Error parsing ice candidate: " + e.getMessage());
             }
+        });
+
+        socket.on("screenCaptureCommand", args -> {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                Toast.makeText(context, "Screen capture command received", Toast.LENGTH_SHORT).show();
+                if (listener instanceof ScreenCaptureCommandListener) {
+                    ((ScreenCaptureCommandListener) listener).onScreenCaptureCommand();
+                }
+            });
         });
     }
 
