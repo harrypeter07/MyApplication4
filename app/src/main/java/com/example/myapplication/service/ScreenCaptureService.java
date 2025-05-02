@@ -79,7 +79,7 @@ public class ScreenCaptureService extends Service {
     private Notification createNotification() {
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setContentTitle("Screen Sharing Active")
-                .setContentText("Your screen is being shared")
+                .setContentText("Your screen is being sharedddd")
                 .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_LOW);
         
