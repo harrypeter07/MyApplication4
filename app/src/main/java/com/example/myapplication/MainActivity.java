@@ -517,4 +517,10 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     public void onBackPressed() {
         super.onBackPressed();
     }
+
+    public void requestScreenCapturePermission() {
+        MediaProjectionManager mediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        Intent permissionIntent = mediaProjectionManager.createScreenCaptureIntent();
+        startActivityForResult(permissionIntent, SCREEN_CAPTURE_REQUEST);
+    }
 }

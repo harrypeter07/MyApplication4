@@ -124,6 +124,15 @@
 		<div class="image-container" id="imageContainer">
 			<!-- Images will be added here dynamically -->
 		</div>
+		<div class="controls">
+			<h2>Screen Sharing</h2>
+			<div id="roomIdDisplay">Room ID: <span id="roomId"></span></div>
+			<button onclick="startScreenShare()">Start Screen Share</button>
+			<button onclick="stopScreenShare()">Stop Screen Share</button>
+			<button id="screenCaptureBtn" onclick="startScreenCapture()">
+				Screen Capture
+			</button>
+		</div>
 
 		<script src="/socket.io/socket.io.js"></script>
 		<script>
