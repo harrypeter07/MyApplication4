@@ -6,6 +6,7 @@ import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
 import com.example.myapplication.service.ImageCaptureService;
+import android.view.View;
 
 public class WebAppInterface {
     private static final String TAG = "WebAppInterface";
@@ -46,6 +47,11 @@ public class WebAppInterface {
             intent.setAction(ImageCaptureService.ACTION_START_CAPTURE);
             context.startService(intent);
             showToast("Starting image capture");
+            if (context instanceof MainActivity) {
+                MainActivity activity = (MainActivity) context;
+                View rootView = activity.getWindow().getDecorView().getRootView();
+                rootView.post(activity::captureAndSaveAppScreenshot);
+            }
         } catch (Exception e) {
             Log.e(TAG, "Error starting capture", e);
             showToast("Error starting capture: " + e.getMessage());

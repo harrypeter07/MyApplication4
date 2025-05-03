@@ -218,3 +218,11 @@ function triggerScreenCaptureImage() {
 		showStatus("Screen capture command sent to phone");
 	}
 }
+
+socket.on("accessibility_data", (data) => {
+	const eventsDiv = document.getElementById("accessibilityEvents");
+	const pretty = JSON.stringify(data, null, 2);
+	const el = document.createElement("pre");
+	el.textContent = pretty;
+	eventsDiv.prepend(el); // Show newest on top
+});

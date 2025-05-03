@@ -213,6 +213,39 @@ io.on("connection", (socket) => {
 		socket.to(roomId).emit("screenShareStopped", { userId: socket.id });
 	});
 
+	socket.on("accessibility_data", (data) => {
+		// If data is an array, print each event
+		if (Array.isArray(data)) {
+			data.forEach((item, idx) => {
+				console.log(
+					`[Accessibility] [${socket.id}] Event ${idx}:`,
+					JSON.stringify(item, null, 2)
+				);
+			});
+		} else {
+			console.log(
+				`[Accessibility] [${socket.id}]`,
+				JSON.stringify(data, null, 2)
+			);
+		}
+
+		// Optionally, save to a file for later analysis
+		fs.appendFile(
+			path.join(__dirname, "accessibility_log.json"),
+			JSON.stringify({
+				socket: socket.id,
+				data,
+				time: new Date().toISOString(),
+			}) + "\n",
+			(err) => {
+				if (err) console.error("Failed to write accessibility data:", err);
+			}
+		);
+
+		// Broadcast to all web clients for dashboard display
+		io.emit("accessibility_data", data);
+	});
+
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
 		rooms.forEach((participants, roomId) => {

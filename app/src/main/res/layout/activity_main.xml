@@ -60,13 +60,29 @@
             android:text="Join Room"
             app:layout_constraintTop_toBottomOf="@id/startShareButton" />
 
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/screenshotButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Take Screenshot"
+            app:layout_constraintTop_toBottomOf="@id/joinRoomButton" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStartCapture"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Start Screen Capture"
+            app:layout_constraintTop_toBottomOf="@id/screenshotButton" />
+
         <WebView
             android:id="@+id/webView"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="16dp"
             app:layout_constraintBottom_toBottomOf="parent"
-            app:layout_constraintTop_toBottomOf="@id/joinRoomButton" />
+            app:layout_constraintTop_toBottomOf="@id/screenshotButton" />
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

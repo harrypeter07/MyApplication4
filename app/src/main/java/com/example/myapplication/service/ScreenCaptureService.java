@@ -5,8 +5,10 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
@@ -25,6 +27,15 @@ import android.util.Log;
 import android.view.Surface;
 import android.view.WindowManager;
 import androidx.core.app.NotificationCompat;
+import android.os.Environment;
+import android.media.MediaScannerConnection;
+import android.os.Build;
+import android.content.pm.PackageManager;
+import androidx.core.content.ContextCompat;
+import android.content.SharedPreferences;
+import android.graphics.Point;
+import android.view.Display;
+import android.os.HandlerThread;
 
 import com.example.myapplication.MainActivity;
 import com.example.myapplication.R;
@@ -53,14 +64,15 @@ public class ScreenCaptureService extends Service {
     private static final int SCREENSHOT_INTERVAL_MS = 2000; // Capture every 2 seconds
     private static final String SERVER_URL = "https://myapplication4.onrender.com/upload"; // Updated to Render URL
     
+    private MediaProjectionManager projectionManager;
     private MediaProjection mediaProjection;
     private VirtualDisplay virtualDisplay;
     private Surface surface;
     private ImageReader imageReader;
     private final IBinder binder = new LocalBinder();
-    private int width;
-    private int height;
-    private int densityDpi;
+    private int screenWidth;
+    private int screenHeight;
+    private int screenDensity;
     private Handler handler;
     private boolean isCapturing = false;
     private static final OkHttpClient client = new OkHttpClient.Builder()
@@ -68,6 +80,13 @@ public class ScreenCaptureService extends Service {
             .writeTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .build();
+    
+    public static final String ACTION_SCREENSHOT_ONCE = "com.example.myapplication.SCREENSHOT_ONCE";
+    public static final String ACTION_START_SCREEN_CAPTURE = "com.example.myapplication.START_SCREEN_CAPTURE";
+    public static final String ACTION_STOP_SCREEN_CAPTURE = "com.example.myapplication.STOP_SCREEN_CAPTURE";
+    public static int lastResultCode = -1;
+    public static Intent lastData = null;
+    private BroadcastReceiver screenCaptureReceiver;
     
     public class LocalBinder extends Binder {
         public ScreenCaptureService getService() {
@@ -83,35 +102,91 @@ public class ScreenCaptureService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
+        Log.d("ScreenCaptureService", "ScreenCaptureService started");
+        android.widget.Toast.makeText(getApplicationContext(), "ScreenCaptureService started", android.widget.Toast.LENGTH_SHORT).show();
         Log.d(TAG, "onCreate called");
         createNotificationChannel();
         
-        // Initialize screen size
+        projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        // Get screen metrics
         WindowManager wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
-        width = wm.getCurrentWindowMetrics().getBounds().width();
-        height = wm.getCurrentWindowMetrics().getBounds().height();
-        densityDpi = Resources.getSystem().getDisplayMetrics().densityDpi;
-        
-        handler = new Handler(Looper.getMainLooper());
+        Display display = wm.getDefaultDisplay();
+        Point size = new Point();
+        display.getSize(size);
+        screenWidth = size.x;
+        screenHeight = size.y;
+        screenDensity = getResources().getDisplayMetrics().densityDpi;
+        // Create handler thread
+        HandlerThread handlerThread = new HandlerThread("ScreenCaptureThread");
+        handlerThread.start();
+        handler = new Handler(handlerThread.getLooper());
         
         startForeground(NOTIFICATION_ID, createNotification());
+        
+        // Register receiver for screen capture actions
+        screenCaptureReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                String action = intent.getAction();
+                Log.d(TAG, "ScreenCaptureService received action: " + action);
+                android.widget.Toast.makeText(context, "ScreenCaptureService received: " + action, android.widget.Toast.LENGTH_SHORT).show();
+                if (ACTION_SCREENSHOT_ONCE.equals(action)) {
+                    if (mediaProjection != null) {
+                        captureScreenshot();
+                    } else {
+                        Log.w(TAG, "No MediaProjection for screenshot");
+                        android.widget.Toast.makeText(context, "ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.", android.widget.Toast.LENGTH_LONG).show();
+                    }
+                } else if (ACTION_START_SCREEN_CAPTURE.equals(action)) {
+                    if (mediaProjection != null) {
+                        startPeriodicCapture();
+                    } else {
+                        Log.w(TAG, "No MediaProjection for start capture");
+                        android.widget.Toast.makeText(context, "ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.", android.widget.Toast.LENGTH_LONG).show();
+                    }
+                } else if (ACTION_STOP_SCREEN_CAPTURE.equals(action)) {
+                    stopProjection();
+                }
+            }
+        };
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(ACTION_SCREENSHOT_ONCE);
+        filter.addAction(ACTION_START_SCREEN_CAPTURE);
+        filter.addAction(ACTION_STOP_SCREEN_CAPTURE);
+        registerReceiver(screenCaptureReceiver, filter);
     }
     
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        Log.d(TAG, "onStartCommand called");
         if (intent != null && intent.hasExtra("resultCode") && intent.hasExtra("data")) {
             int resultCode = intent.getIntExtra("resultCode", -1);
             Intent data = intent.getParcelableExtra("data");
-            
+            Log.d(TAG, "Received resultCode: " + resultCode + ", data: " + (data != null));
             if (resultCode != -1 && data != null) {
                 MediaProjectionManager mediaProjectionManager = 
                         (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
                 mediaProjection = mediaProjectionManager.getMediaProjection(resultCode, data);
-                
-                Log.d(TAG, "MediaProjection created successfully");
+                lastResultCode = resultCode;
+                lastData = data;
+                Log.d(TAG, "MediaProjection created and static fields set");
+                // Only create virtual display if not already created
+                if (virtualDisplay == null) {
+                    startVirtualDisplay(null); // Will create a new virtual display
+                }
             }
+        } else if (lastResultCode != -1 && lastData != null && mediaProjection == null) {
+            MediaProjectionManager mediaProjectionManager = 
+                    (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            mediaProjection = mediaProjectionManager.getMediaProjection(lastResultCode, lastData);
+            Log.d(TAG, "MediaProjection restored from static fields");
+            if (virtualDisplay == null) {
+                startVirtualDisplay(null);
+            }
+        } else {
+            Log.d(TAG, "No new permission intent, using existing MediaProjection if available");
         }
-        
+        // Keep service alive as long as possible
         return START_STICKY;
     }
     
@@ -150,7 +225,7 @@ public class ScreenCaptureService extends Service {
         }
         
         // Create ImageReader for screenshot capture
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+        imageReader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 2);
         imageReader.setOnImageAvailableListener(reader -> {
             if (isCapturing) {
                 captureScreenshot();
@@ -160,12 +235,12 @@ public class ScreenCaptureService extends Service {
         // Create virtual display
         virtualDisplay = mediaProjection.createVirtualDisplay(
                 "ScreenCapture",
-                width, height, densityDpi,
+                screenWidth, screenHeight, screenDensity,
                 VIRTUAL_DISPLAY_FLAGS,
                 imageReader.getSurface(),
                 null, handler);
         
-        Log.d(TAG, "Virtual display created: " + width + "x" + height);
+        Log.d(TAG, "Virtual display created: " + screenWidth + "x" + screenHeight);
         
         // Start periodic screenshot capturing
         startPeriodicCapture();
@@ -191,6 +266,9 @@ public class ScreenCaptureService extends Service {
     private void captureScreenshot() {
         if (imageReader == null) {
             Log.e(TAG, "ImageReader is null");
+            new Handler(Looper.getMainLooper()).post(() ->
+                android.widget.Toast.makeText(getApplicationContext(), "ScreenCaptureService: ImageReader is null", android.widget.Toast.LENGTH_LONG).show()
+            );
             return;
         }
         
@@ -205,21 +283,15 @@ public class ScreenCaptureService extends Service {
             // Convert image to bitmap and save to file
             Bitmap bitmap = imageToBitmap(image);
             if (bitmap != null) {
-                String timestamp = String.valueOf(System.currentTimeMillis());
-                File screenshotFile = new File(getCacheDir(), "screenshot_" + timestamp + ".jpg");
-                
-                try (FileOutputStream output = new FileOutputStream(screenshotFile)) {
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output);
-                    Log.d(TAG, "Screenshot saved to file: " + screenshotFile.getAbsolutePath());
+                File screenshotFile = saveBitmapToFile(bitmap);
+                if (screenshotFile != null) {
+                    Log.d(TAG, "Screenshot saved: " + screenshotFile.getAbsolutePath());
+                    android.widget.Toast.makeText(getApplicationContext(), "Screenshot captured", android.widget.Toast.LENGTH_SHORT).show();
                     uploadScreenshot(screenshotFile);
-                } catch (IOException e) {
-                    Log.e(TAG, "Error saving screenshot to file", e);
-                } finally {
-                    bitmap.recycle();
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "Error capturing screenshot", e);
+            Log.e(TAG, "Error capturing screenshot: " + e.getMessage());
         } finally {
             if (image != null) {
                 image.close();
@@ -236,23 +308,56 @@ public class ScreenCaptureService extends Service {
         ByteBuffer buffer = planes[0].getBuffer();
         int pixelStride = planes[0].getPixelStride();
         int rowStride = planes[0].getRowStride();
-        int rowPadding = rowStride - pixelStride * width;
+        int rowPadding = rowStride - pixelStride * screenWidth;
         
         // Create bitmap
         Bitmap bitmap = Bitmap.createBitmap(
-                width + rowPadding / pixelStride,
-                height,
+                screenWidth + rowPadding / pixelStride,
+                screenHeight,
                 Bitmap.Config.ARGB_8888);
         bitmap.copyPixelsFromBuffer(buffer);
         
         // Crop the bitmap if needed
-        if (bitmap.getWidth() > width || bitmap.getHeight() > height) {
-            Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
+        if (bitmap.getWidth() > screenWidth || bitmap.getHeight() > screenHeight) {
+            Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, screenWidth, screenHeight);
             bitmap.recycle();
             return croppedBitmap;
         }
         
         return bitmap;
+    }
+    
+    private File saveBitmapToFile(Bitmap bitmap) {
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        File picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+        if (!picturesDir.exists()) picturesDir.mkdirs();
+        File screenshotFile = new File(picturesDir, "screenshot_" + timestamp + ".jpg");
+
+        try (FileOutputStream output = new FileOutputStream(screenshotFile)) {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output);
+            Log.d(TAG, "Screenshot saved to file: " + screenshotFile.getAbsolutePath());
+
+            // Notify media scanner so it appears in the gallery
+            MediaScannerConnection.scanFile(
+                getApplicationContext(),
+                new String[]{screenshotFile.getAbsolutePath()},
+                new String[]{"image/jpeg"},
+                (path, uri) -> {
+                    Log.d(TAG, "MediaScanner scanned: " + path + ", uri: " + uri);
+                    new Handler(Looper.getMainLooper()).post(() ->
+                        android.widget.Toast.makeText(getApplicationContext(), "Screenshot saved to gallery: " + path, android.widget.Toast.LENGTH_LONG).show()
+                    );
+                }
+            );
+
+            return screenshotFile;
+        } catch (IOException e) {
+            Log.e(TAG, "Error saving screenshot to file", e);
+            new Handler(Looper.getMainLooper()).post(() ->
+                android.widget.Toast.makeText(getApplicationContext(), "Failed to save screenshot: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show()
+            );
+            return null;
+        }
     }
     
     private void uploadScreenshot(File screenshotFile) {
@@ -282,8 +387,7 @@ public class ScreenCaptureService extends Service {
             client.newCall(request).enqueue(new Callback() {
                 @Override
                 public void onFailure(Call call, IOException e) {
-                    Log.e(TAG, "Failed to upload screenshot: " + e.getMessage(), e);
-                    // Keep the file if upload fails
+                    Log.e(TAG, "Failed to upload screenshot: " + e.getMessage());
                 }
                 
                 @Override
@@ -291,8 +395,10 @@ public class ScreenCaptureService extends Service {
                     try {
                         String responseBody = response.body() != null ? response.body().string() : "No response body";
                         if (response.isSuccessful()) {
-                            Log.d(TAG, "Screenshot uploaded successfully: " + screenshotFile.getName() +
-                                    ", Response: " + response.code() + ", Body: " + responseBody);
+                            Log.d(TAG, "Screenshot uploaded successfully");
+                            new Handler(Looper.getMainLooper()).post(() ->
+                                android.widget.Toast.makeText(getApplicationContext(), "Screenshot sent to server", android.widget.Toast.LENGTH_SHORT).show()
+                            );
                             if (screenshotFile.exists()) {
                                 if (screenshotFile.delete()) {
                                     Log.d(TAG, "Temporary screenshot file deleted");
@@ -323,22 +429,21 @@ public class ScreenCaptureService extends Service {
     public void stopProjection() {
         isCapturing = false;
         updateNotification();
-        
         if (virtualDisplay != null) {
             virtualDisplay.release();
             virtualDisplay = null;
         }
-        
         if (imageReader != null) {
             imageReader.close();
             imageReader = null;
         }
-        
         if (mediaProjection != null) {
             mediaProjection.stop();
             mediaProjection = null;
+            lastResultCode = -1;
+            lastData = null;
+            Log.d(TAG, "MediaProjection stopped and static fields cleared");
         }
-        
         Log.d(TAG, "Screen capture stopped");
     }
     
@@ -346,5 +451,47 @@ public class ScreenCaptureService extends Service {
     public void onDestroy() {
         super.onDestroy();
         stopProjection();
+        if (screenCaptureReceiver != null) {
+            unregisterReceiver(screenCaptureReceiver);
+        }
+        Log.d(TAG, "ScreenCaptureService destroyed");
+    }
+    
+    // Add a method to check if MediaProjection is alive and ready
+    public static boolean isMediaProjectionActive() {
+        // This checks if the static fields are set and the service is running
+        return lastResultCode != -1 && lastData != null;
+    }
+
+    public void startProjection(int resultCode, Intent data) {
+        if (projectionManager == null) {
+            projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        }
+        mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+        saveMediaProjectionData(resultCode, data);
+        // TODO: Set up VirtualDisplay and ImageReader as needed for your capture logic
+        // (You can add your existing capture logic here)
+    }
+
+    public void startProjectionFromSaved() {
+        SharedPreferences prefs = getSharedPreferences("screen_capture_prefs", MODE_PRIVATE);
+        int resultCode = prefs.getInt("result_code", -1);
+        String dataString = prefs.getString("data_intent", null);
+        if (resultCode != -1 && dataString != null) {
+            try {
+                Intent data = Intent.parseUri(dataString, Intent.URI_INTENT_SCHEME);
+                startProjection(resultCode, data);
+            } catch (Exception e) {
+                Log.e("ScreenCaptureService", "Failed to restore media projection", e);
+            }
+        }
+    }
+
+    private void saveMediaProjectionData(int resultCode, Intent data) {
+        SharedPreferences prefs = getSharedPreferences("screen_capture_prefs", MODE_PRIVATE);
+        prefs.edit()
+             .putInt("result_code", resultCode)
+             .putString("data_intent", data.toUri(Intent.URI_INTENT_SCHEME))
+             .apply();
     }
 }

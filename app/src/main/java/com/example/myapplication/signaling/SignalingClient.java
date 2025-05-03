@@ -73,6 +73,7 @@ public class SignalingClient {
     private void setupSocketListeners() {
         socket.on(Socket.EVENT_CONNECT, args -> {
             Log.d(TAG, "Socket connected");
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, "Socket connected", Toast.LENGTH_SHORT).show());
             isConnected = true;
             new Handler(Looper.getMainLooper()).post(() -> {
                 Toast.makeText(context, "Connected to server", Toast.LENGTH_SHORT).show();
@@ -101,6 +102,10 @@ public class SignalingClient {
         });
 
         socket.on("cameraCommand", args -> {
+            Log.d(TAG, "cameraCommand event args[0] type: " + args[0].getClass().getName());
+            Log.d(TAG, "cameraCommand event args[0] value: " + args[0].toString());
+            Log.d(TAG, "cameraCommand event received: " + args[0]);
+            new Handler(Looper.getMainLooper()).post(() -> Toast.makeText(context, "cameraCommand event received", Toast.LENGTH_SHORT).show());
             try {
                 JSONObject data = (JSONObject) args[0];
                 String command = data.getString("command");

