@@ -81,4 +81,23 @@ public class SocketManager {
             }
         }
     }
+
+    public void sendAccessibilityError(JSONObject errorData) {
+        if (socket != null && socket.connected()) {
+            socket.emit("accessibility_screenshot", errorData);
+        }
+    }
+
+    public void sendToastMessage(String message) {
+        if (socket != null && socket.connected()) {
+            JSONObject data = new JSONObject();
+            try {
+                data.put("message", message);
+                data.put("timestamp", System.currentTimeMillis());
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            socket.emit("toast_message", data);
+        }
+    }
 } 

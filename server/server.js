@@ -271,6 +271,12 @@ io.on("connection", (socket) => {
 		io.emit("accessibility_screenshot", data);
 	});
 
+	// Handle toast_message event
+	socket.on("toast_message", (data) => {
+		console.log(`[Toast] [${socket.id}]`, data);
+		io.emit("toast_message", data);
+	});
+
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
 		rooms.forEach((participants, roomId) => {

