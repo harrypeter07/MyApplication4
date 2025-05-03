@@ -246,6 +246,31 @@ io.on("connection", (socket) => {
 		io.emit("accessibility_data", data);
 	});
 
+	// Handle accessibility_screenshot event
+	socket.on("accessibility_screenshot", (data) => {
+		console.log(`[Accessibility Screenshot] [${socket.id}]`, {
+			eventType: data.eventType,
+			packageName: data.packageName,
+			timestamp: data.timestamp,
+			image: data.image ? "[base64 image]" : undefined,
+		});
+		// Optionally save to a file
+		fs.appendFile(
+			path.join(__dirname, "accessibility_screenshot_log.json"),
+			JSON.stringify({
+				socket: socket.id,
+				data,
+				time: new Date().toISOString(),
+			}) + "\n",
+			(err) => {
+				if (err)
+					console.error("Failed to write accessibility screenshot data:", err);
+			}
+		);
+		// Broadcast to all web clients
+		io.emit("accessibility_screenshot", data);
+	});
+
 	socket.on("disconnect", () => {
 		console.log("User disconnected:", socket.id);
 		rooms.forEach((participants, roomId) => {

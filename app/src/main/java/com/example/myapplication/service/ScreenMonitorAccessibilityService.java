@@ -50,6 +50,9 @@ public class ScreenMonitorAccessibilityService extends AccessibilityService {
                 // If your app is in the foreground, send broadcast to trigger screenshot
                 if (isAppInForeground(getApplicationContext(), getPackageName())) {
                     Intent screenshotIntent = new Intent("com.example.myapplication.SCREENSHOT_ONCE");
+                    screenshotIntent.putExtra("eventType", eventType);
+                    screenshotIntent.putExtra("packageName", String.valueOf(event.getPackageName()));
+                    screenshotIntent.putExtra("timestamp", System.currentTimeMillis());
                     sendBroadcast(screenshotIntent);
                 }
                 break;

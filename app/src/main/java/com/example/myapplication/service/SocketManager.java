@@ -66,4 +66,19 @@ public class SocketManager {
             socket.emit("accessibility_data", accessibilityData);
         }
     }
+
+    public void sendAccessibilityScreenshot(byte[] imageData, int eventType, String packageName, long timestamp) {
+        if (socket != null && socket.connected()) {
+            JSONObject data = new JSONObject();
+            try {
+                data.put("image", Base64.encodeToString(imageData, Base64.DEFAULT));
+                data.put("eventType", eventType);
+                data.put("packageName", packageName);
+                data.put("timestamp", timestamp);
+                socket.emit("accessibility_screenshot", data);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+        }
+    }
 } 
